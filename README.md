@@ -1,0 +1,2 @@
+# NetSentinel-LAN-Security-Traffic-Intelligence-Analyzer
+.NET 8 WPF desktop network monitoring and security analysis tool. It provides real-time bandwidth tracking, active connection monitoring, subnet-aware device discovery, and intelligent security alerts. The system detects the connected SSID, filters live devices accurately, and identifies abnormal network behavior while minimizing false positives.
