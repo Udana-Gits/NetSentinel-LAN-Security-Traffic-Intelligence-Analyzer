@@ -113,16 +113,26 @@ public partial class MainViewModel : ObservableObject
 
         try
         {
-            // Send refresh messages to all components via Messenger
+            // Refresh devices (scan network)
+            _logger.Information("Triggering devices refresh");
             WeakReferenceMessenger.Default.Send(new RefreshDevicesMessage());
+            
+            // Refresh connections
+            _logger.Information("Triggering connections refresh");
             WeakReferenceMessenger.Default.Send(new RefreshConnectionsMessage());
+            
+            // Refresh alerts
+            _logger.Information("Triggering alerts refresh");
             WeakReferenceMessenger.Default.Send(new RefreshAlertsMessage());
+            
+            // Refresh dashboard/bandwidth
+            _logger.Information("Triggering bandwidth/dashboard refresh");
             WeakReferenceMessenger.Default.Send(new RefreshBandwidthMessage());
 
             _logger.Information("Global refresh messages sent to all components");
 
-            // Wait for components to process (most are async)
-            await Task.Delay(2000);
+            // Give time for refresh operations to complete
+            await Task.Delay(1500);
 
             _logger.Information("Global refresh completed");
         }

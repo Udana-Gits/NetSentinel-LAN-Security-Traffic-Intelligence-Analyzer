@@ -86,7 +86,7 @@
 
         <!-- Alerts List -->
         <Border Style="{StaticResource Card}" Grid.Row="3">
-            <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <ScrollViewer VerticalScrollBarVisibility="Hidden">
                 <ItemsControl ItemsSource="{Binding Alerts}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
@@ -142,7 +142,7 @@
                                                   TextWrapping="Wrap" Margin="0,0,0,12"/>
                                         
                                         <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="{Binding Timestamp, StringFormat='Time: {0:yyyy-MM-dd HH:mm:ss}'}" 
+                                            <TextBlock Text="{Binding Timestamp, Converter={StaticResource UtcToLocalTimeConverter}, StringFormat='Time: {0:yyyy-MM-dd HH:mm:ss}'}" 
                                                       FontSize="12" Foreground="{StaticResource MutedTextBrush}"/>
                                             <TextBlock Text="{Binding SourceIp, StringFormat=' | Source IP: {0}'}" 
                                                       FontSize="12" Foreground="{StaticResource MutedTextBrush}"

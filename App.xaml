@@ -20,6 +20,7 @@
             <converters:StringToVisibilityConverter x:Key="StringToVisibilityConverter"/>
             <converters:ViewNameToTagConverter x:Key="ViewNameToTagConverter"/>
             <converters:DeviceTypeToIconConverter x:Key="DeviceTypeToIconConverter"/>
+            <converters:UtcToLocalTimeConverter x:Key="UtcToLocalTimeConverter"/>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

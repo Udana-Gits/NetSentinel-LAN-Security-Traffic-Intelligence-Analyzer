@@ -191,9 +191,11 @@ public partial class DashboardViewModel : ObservableObject
         _logger.Information("DashboardViewModel received refresh message");
         Application.Current?.Dispatcher.Invoke(async () =>
         {
+            StatusMessage = "Refreshing dashboard...";
             await UpdateDashboardAsync();
             await UpdateNetworkInfoAsync();
             await LoadRecentAlertsAsync();
+            StatusMessage = "Ready";
         });
     }
 
@@ -253,16 +255,23 @@ public partial class DashboardViewModel : ObservableObject
         var networkInfo = await _networkManager.GetActiveNetworkInterfaceAsync();
         if (networkInfo != null)
         {
-            // Try SSID first, then Name, then show "Not Connected"
-            CurrentSsid = !string.IsNullOrWhiteSpace(networkInfo.Ssid) 
-                ? networkInfo.Ssid 
-                : !string.IsNullOrWhiteSpace(networkInfo.Name) 
-                    ? networkInfo.Name 
-                    : "Not Connected";
             CurrentIpAddress = networkInfo.IpAddress;
             CurrentGateway = networkInfo.Gateway;
             
-            _logger.Information("Network info updated - SSID: {SSID}, IP: {IP}", CurrentSsid, CurrentIpAddress);
+            // Try to get SSID from multiple sources
+            if (!string.IsNullOrWhiteSpace(networkInfo.Ssid))
+            {
+                CurrentSsid = networkInfo.Ssid;
+            }
+            else
+            {
+                // Try the direct method
+                var ssid = _networkManager.GetConnectedSsid();
+                CurrentSsid = (ssid != "Not Connected") ? ssid : networkInfo.Name ?? "Not Connected";
+            }
+            
+            _logger.Information("Network info updated - SSID: {SSID}, IP: {IP}, Gateway: {Gateway}", 
+                CurrentSsid, CurrentIpAddress, CurrentGateway);
         }
         else
         {
@@ -271,8 +280,8 @@ public partial class DashboardViewModel : ObservableObject
             CurrentGateway = "0.0.0.0";
         }
 
-        // Get connected SSID using direct method
-        ConnectedSsid = _networkManager.GetConnectedSsid();
+        // Update connected SSID display
+        ConnectedSsid = CurrentSsid;
     }
 
     private void OnBandwidthUpdated(object? sender, BandwidthEventArgs e)

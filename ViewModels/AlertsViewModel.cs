@@ -71,7 +71,7 @@ public partial class AlertsViewModel : ObservableObject
     private void HandleRefreshMessage()
     {
         _logger.Information("AlertsViewModel received refresh message");
-        Application.Current?.Dispatcher.Invoke(async () =>
+        Application.Current?.Dispatcher.InvokeAsync(async () =>
         {
             await Refresh();
         });

@@ -63,7 +63,10 @@ public partial class ConnectionsViewModel : ObservableObject
     private void HandleRefreshMessage()
     {
         _logger.Information("ConnectionsViewModel received refresh message");
-        Refresh();
+        Application.Current?.Dispatcher.Invoke(() =>
+        {
+            Refresh();
+        });
     }
 
     private void OnConnectionsUpdated(object? sender, ConnectionsUpdatedEventArgs e)

@@ -4,7 +4,7 @@
              xmlns:lvc="clr-namespace:LiveChartsCore.SkiaSharpView.WPF;assembly=LiveChartsCore.SkiaSharpView.WPF"
              Background="{StaticResource DeepNavyBlueBrush}">
     
-    <ScrollViewer VerticalScrollBarVisibility="Auto">
+    <ScrollViewer VerticalScrollBarVisibility="Hidden">
         <StackPanel Margin="30">
             <!-- Header -->
             <TextBlock Text="Dashboard" Style="{StaticResource TitleText}" Margin="0,0,0,10"/>
@@ -220,7 +220,7 @@
                                                       TextWrapping="Wrap" Margin="0,4,0,0"/>
                                         </StackPanel>
 
-                                        <TextBlock Grid.Column="2" Text="{Binding Timestamp, StringFormat={}{0:HH:mm}}" 
+                                        <TextBlock Grid.Column="2" Text="{Binding Timestamp, Converter={StaticResource UtcToLocalTimeConverter}, StringFormat={}{0:HH:mm}}" 
                                                   FontSize="12" Foreground="{StaticResource MutedTextBrush}" 
                                                   VerticalAlignment="Top"/>
                                     </Grid>

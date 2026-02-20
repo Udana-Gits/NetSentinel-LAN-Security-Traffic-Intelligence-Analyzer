@@ -150,7 +150,8 @@ public class NetworkManager
                     Arguments = "wlan show interfaces",
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
-                    CreateNoWindow = true
+                    CreateNoWindow = true,
+                    StandardOutputEncoding = Encoding.UTF8
                 }
             };
 
@@ -158,14 +159,19 @@ public class NetworkManager
             var output = process.StandardOutput.ReadToEnd();
             process.WaitForExit();
 
-            var lines = output.Split('\n');
+            _logger.Debug("netsh wlan show interfaces output: {Output}", output);
+
+            var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
             foreach (var line in lines)
             {
                 var trimmedLine = line.Trim();
-                // Look for SSID but exclude BSSID line
-                if (trimmedLine.StartsWith("SSID", StringComparison.OrdinalIgnoreCase) &&
-                    !trimmedLine.StartsWith("BSSID", StringComparison.OrdinalIgnoreCase))
+                // Look for SSID line (but not BSSID)
+                if (trimmedLine.StartsWith("SSID", StringComparison.OrdinalIgnoreCase))
                 {
+                    // Check it's not BSSID
+                    if (trimmedLine.StartsWith("BSSID", StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    
                     var colonIndex = trimmedLine.IndexOf(':');
                     if (colonIndex > 0 && colonIndex < trimmedLine.Length - 1)
                     {
@@ -179,7 +185,7 @@ public class NetworkManager
                 }
             }
             
-            _logger.Warning("No SSID found in netsh output");
+            _logger.Warning("No SSID found in netsh output. Output length: {Length}", output.Length);
         }
         catch (Exception ex)
         {
@@ -198,12 +204,8 @@ public class NetworkManager
         try
         {
             if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            {
-                _logger.Debug("GetConnectedSsid is only supported on Windows");
                 return "Not Connected";
-            }
 
-            // Execute netsh command to get WiFi interface information
             var process = new System.Diagnostics.Process
             {
                 StartInfo = new System.Diagnostics.ProcessStartInfo
@@ -212,7 +214,8 @@ public class NetworkManager
                     Arguments = "wlan show interfaces",
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
-                    CreateNoWindow = true
+                    CreateNoWindow = true,
+                    StandardOutputEncoding = Encoding.UTF8
                 }
             };
 
@@ -220,80 +223,42 @@ public class NetworkManager
             var output = process.StandardOutput.ReadToEnd();
             process.WaitForExit();
 
-            // Validate output
             if (string.IsNullOrWhiteSpace(output))
             {
-                _logger.Debug("Empty output from netsh command");
+                _logger.Warning("netsh wlan command returned empty output");
                 return "Not Connected";
             }
 
-            // Parse output to extract State and SSID
-            var lines = output.Split('\n');
-            string? ssid = null;
-            bool isConnected = false;
-
+            var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
             foreach (var line in lines)
             {
-                if (string.IsNullOrWhiteSpace(line))
-                    continue;
-
                 var trimmedLine = line.Trim();
-
-                // Check connection state
-                if (trimmedLine.StartsWith("State", StringComparison.OrdinalIgnoreCase))
+                // Look for SSID line
+                if (trimmedLine.StartsWith("SSID", StringComparison.OrdinalIgnoreCase))
                 {
+                    // Make sure it's not BSSID
+                    if (trimmedLine.StartsWith("BSSID", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
                     var colonIndex = trimmedLine.IndexOf(':');
                     if (colonIndex > 0 && colonIndex < trimmedLine.Length - 1)
                     {
-                        var state = trimmedLine.Substring(colonIndex + 1).Trim();
-                        isConnected = state.Equals("connected", StringComparison.OrdinalIgnoreCase);
-                    }
-                }
-
-                // Extract SSID - must be exact "SSID" line, not "BSSID" or "SSID 1", "SSID 2", etc.
-                if (trimmedLine.StartsWith("SSID", StringComparison.OrdinalIgnoreCase) &&
-                    !trimmedLine.StartsWith("BSSID", StringComparison.OrdinalIgnoreCase))
-                {
-                    // Check if it's a numbered SSID line (e.g., "SSID 1") - ignore those
-                    var colonIndex = trimmedLine.IndexOf(':');
-                    if (colonIndex > 0)
-                    {
-                        var beforeColon = trimmedLine.Substring(0, colonIndex).Trim();
-                        
-                        // Only accept lines that are exactly "SSID" (not "SSID 1", "SSID 2", etc.)
-                        if (beforeColon.Equals("SSID", StringComparison.OrdinalIgnoreCase))
+                        var ssid = trimmedLine.Substring(colonIndex + 1).Trim();
+                        if (!string.IsNullOrWhiteSpace(ssid))
                         {
-                            if (colonIndex < trimmedLine.Length - 1)
-                            {
-                                var extractedSsid = trimmedLine.Substring(colonIndex + 1).Trim();
-                                
-                                // Additional whitespace cleanup
-                                if (!string.IsNullOrWhiteSpace(extractedSsid))
-                                {
-                                    ssid = extractedSsid;
-                                }
-                            }
+                            _logger.Information("Connected SSID: {SSID}", ssid);
+                            return ssid;
                         }
                     }
                 }
             }
-
-            // Return SSID only if State is connected and SSID is valid
-            if (isConnected && !string.IsNullOrWhiteSpace(ssid))
-            {
-                _logger.Debug("Retrieved connected SSID: {SSID}", ssid);
-                return ssid;
-            }
-
-            _logger.Debug("Not connected to WiFi or SSID not found (State: {IsConnected}, SSID: {SSID})", 
-                isConnected, ssid ?? "null");
-            return "Not Connected";
         }
         catch (Exception ex)
         {
-            _logger.Error(ex, "Error retrieving connected SSID");
-            return "Not Connected";
+            _logger.Error(ex, "Failed to get connected SSID");
         }
+
+        return "Not Connected";
     }
 
     /// <summary>

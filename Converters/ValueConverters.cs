@@ -205,3 +205,34 @@ public class DeviceTypeToIconConverter : IValueConverter
         throw new NotImplementedException();
     }
 }
+
+/// <summary>
+/// Converts UTC DateTime to local time for display
+/// </summary>
+public class UtcToLocalTimeConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        if (value is DateTime dateTime)
+        {
+            // If the DateTime is UTC, convert to local time
+            if (dateTime.Kind == DateTimeKind.Utc)
+            {
+                return dateTime.ToLocalTime();
+            }
+            // If it's Unspecified, assume it's UTC and convert
+            else if (dateTime.Kind == DateTimeKind.Unspecified)
+            {
+                return DateTime.SpecifyKind(dateTime, DateTimeKind.Utc).ToLocalTime();
+            }
+            // If it's already local, return as-is
+            return dateTime;
+        }
+        return value;
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        throw new NotImplementedException();
+    }
+}

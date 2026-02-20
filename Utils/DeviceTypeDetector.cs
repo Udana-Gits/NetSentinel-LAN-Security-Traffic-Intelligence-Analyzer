@@ -10,8 +10,26 @@ public static class DeviceTypeDetector
 {
     public static DeviceType DetectDeviceType(string vendor, string? hostname, string macAddress)
     {
-        var vendorLower = vendor.ToLowerInvariant();
+        var vendorLower = vendor?.ToLowerInvariant() ?? "";
         var hostnameLower = hostname?.ToLowerInvariant() ?? "";
+
+        // First check hostname patterns as they can be more specific
+        if (!string.IsNullOrWhiteSpace(hostnameLower))
+        {
+            // Mobile device patterns in hostname
+            if (hostnameLower.Contains("pixel") && (hostnameLower.Contains("pro") || hostnameLower.Contains("-9-") || hostnameLower.Contains("-8-")))
+            {
+                return DeviceType.Mobile;
+            }
+            if (hostnameLower.Contains("iphone") || hostnameLower.Contains("android"))
+            {
+                return DeviceType.Mobile;
+            }
+            if (hostnameLower.Contains("ipad"))
+            {
+                return DeviceType.Tablet;
+            }
+        }
 
         // Router/Gateway detection
         if (vendorLower.Contains("cisco") || vendorLower.Contains("netgear") || 
@@ -146,6 +164,26 @@ public static class DeviceTypeDetector
         if (hostnameLower.Contains("laptop") || hostnameLower.Contains("notebook"))
         {
             return DeviceType.Laptop;
+        }
+        
+        // Additional hostname-based detection for unknown vendors
+        if (hostnameLower.Contains("android") || hostnameLower.Contains("phone"))
+        {
+            return DeviceType.Mobile;
+        }
+        if (hostnameLower.Contains("server") || hostnameLower.Contains("nas"))
+        {
+            return DeviceType.Desktop;
+        }
+        if (hostnameLower.Contains("wifi") || hostnameLower.Contains("router"))
+        {
+            return DeviceType.Router;
+        }
+        
+        // If hostname contains a recognizable pattern like "Pixel-9-Pro", detect as mobile
+        if (hostnameLower.Contains("pixel"))
+        {
+            return DeviceType.Mobile;
         }
 
         return DeviceType.Unknown;

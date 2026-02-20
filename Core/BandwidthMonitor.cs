@@ -173,12 +173,40 @@ public class BandwidthMonitor
 
         try
         {
-            var interfaces = NetworkInterface.GetAllNetworkInterfaces()
+            // Get the current active network interface info
+            var activeInterface = _networkManager.GetCurrentInterface();
+            
+            if (activeInterface != null)
+            {
+                // Find the specific network interface by name or MAC address
+                var interfaces = NetworkInterface.GetAllNetworkInterfaces()
+                    .Where(ni => ni.OperationalStatus == OperationalStatus.Up);
+
+                foreach (var ni in interfaces)
+                {
+                    // Match by interface name or description
+                    if (ni.Name == activeInterface.Name || 
+                        ni.Description == activeInterface.Description)
+                    {
+                        var stats = ni.GetIPv4Statistics();
+                        bytesSent = stats.BytesSent;
+                        bytesReceived = stats.BytesReceived;
+                        _logger.Debug("Bandwidth stats from {Interface}: Sent={Sent}, Received={Received}", 
+                            ni.Name, bytesSent, bytesReceived);
+                        return;
+                    }
+                }
+            }
+            
+            // Fallback: if no active interface is set, use all non-virtual interfaces
+            _logger.Debug("No active interface found, using all non-virtual interfaces");
+            var fallbackInterfaces = NetworkInterface.GetAllNetworkInterfaces()
                 .Where(ni => ni.OperationalStatus == OperationalStatus.Up &&
                             ni.NetworkInterfaceType != NetworkInterfaceType.Loopback &&
-                            ni.NetworkInterfaceType != NetworkInterfaceType.Tunnel);
+                            ni.NetworkInterfaceType != NetworkInterfaceType.Tunnel &&
+                            !IsVirtualInterface(ni.Name, ni.Description));
 
-            foreach (var ni in interfaces)
+            foreach (var ni in fallbackInterfaces)
             {
                 var stats = ni.GetIPv4Statistics();
                 bytesSent += stats.BytesSent;
@@ -189,6 +217,17 @@ public class BandwidthMonitor
         {
             _logger.Warning(ex, "Failed to get network statistics");
         }
+    }
+
+    /// <summary>
+    /// Checks if a network interface is virtual
+    /// </summary>
+    private static bool IsVirtualInterface(string name, string description)
+    {
+        var virtualKeywords = new[] { "vmware", "virtualbox", "hyper-v", "docker", "wsl", "virtual", "vethernet" };
+        var combinedText = $"{name} {description}".ToLower();
+        
+        return virtualKeywords.Any(keyword => combinedText.Contains(keyword));
     }
 
     /// <summary>

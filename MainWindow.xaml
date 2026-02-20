@@ -72,21 +72,110 @@
                               VerticalAlignment="Center"/>
                 </StackPanel>
                 
-                <!-- Window State Indicator (Admin Badge) -->
+                <!-- Window Control Buttons -->
                 <StackPanel Orientation="Horizontal" 
                            HorizontalAlignment="Right" 
                            VerticalAlignment="Center"
-                           Margin="0,0,140,0">
-                    <Border Background="{StaticResource DarkPurpleBrush}" 
-                           CornerRadius="3" 
-                           Padding="6,2"
-                           Visibility="{Binding IsAdmin, Converter={StaticResource BooleanToVisibilityConverter}}">
-                        <TextBlock Text="ADMIN" 
-                                  FontSize="10" 
-                                  FontWeight="Bold" 
-                                  Foreground="White"/>
-                    </Border>
-                </StackPanel>
+                           WindowChrome.IsHitTestVisibleInChrome="True">
+                    <!-- Minimize Button -->
+                    <Button x:Name="MinimizeButton" 
+                           Click="MinimizeButton_Click"
+                           Width="46" Height="40"
+                           Background="Transparent"
+                           BorderThickness="0"
+                           Foreground="White"
+                           FontFamily="Segoe MDL2 Assets"
+                           FontSize="10"
+                           Content="&#xE921;"
+                           Style="{StaticResource {x:Static ToolBar.ButtonStyleKey}}">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border Background="{TemplateBinding Background}">
+                                    <TextBlock Text="{TemplateBinding Content}" 
+                                              FontFamily="{TemplateBinding FontFamily}"
+                                              FontSize="{TemplateBinding FontSize}"
+                                              Foreground="{TemplateBinding Foreground}"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter Property="Background" Value="#33FFFFFF"/>
+                                    </Trigger>
+                                    <Trigger Property="IsPressed" Value="True">
+                                        <Setter Property="Background" Value="#22FFFFFF"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+                    
+                    <!-- Maximize/Restore Button -->
+                    <Button x:Name="MaximizeButton" 
+                           Click="MaximizeButton_Click"
+                           Width="46" Height="40"
+                           Background="Transparent"
+                           BorderThickness="0"
+                           Foreground="White"
+                           FontFamily="Segoe MDL2 Assets"
+                           FontSize="10"
+                           Content="&#xE922;"
+                           Style="{StaticResource {x:Static ToolBar.ButtonStyleKey}}">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border Background="{TemplateBinding Background}">
+                                    <TextBlock Text="{TemplateBinding Content}" 
+                                              FontFamily="{TemplateBinding FontFamily}"
+                                              FontSize="{TemplateBinding FontSize}"
+                                              Foreground="{TemplateBinding Foreground}"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter Property="Background" Value="#33FFFFFF"/>
+                                    </Trigger>
+                                    <Trigger Property="IsPressed" Value="True">
+                                        <Setter Property="Background" Value="#22FFFFFF"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+                    
+                    <!-- Close Button -->
+                    <Button x:Name="CloseButton" 
+                           Click="CloseButton_Click"
+                           Width="46" Height="40"
+                           Background="Transparent"
+                           BorderThickness="0"
+                           Foreground="White"
+                           FontFamily="Segoe MDL2 Assets"
+                           FontSize="10"
+                           Content="&#xE8BB;"
+                           Style="{StaticResource {x:Static ToolBar.ButtonStyleKey}}">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border Background="{TemplateBinding Background}">
+                                    <TextBlock Text="{TemplateBinding Content}" 
+                                              FontFamily="{TemplateBinding FontFamily}"
+                                              FontSize="{TemplateBinding FontSize}"
+                                              Foreground="{TemplateBinding Foreground}"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter Property="Background" Value="#E81123"/>
+                                    </Trigger>
+                                    <Trigger Property="IsPressed" Value="True">
+                                        <Setter Property="Background" Value="#8C0A15"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+                    </StackPanel>
             </Grid>
         </Border>
 

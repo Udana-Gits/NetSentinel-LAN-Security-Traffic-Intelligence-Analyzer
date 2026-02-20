@@ -213,6 +213,8 @@
         <Setter Property="ColumnHeaderHeight" Value="50"/>
         <Setter Property="RowHeight" Value="50"/>
         <Setter Property="FontSize" Value="14"/>
+        <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Hidden"/>
+        <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Hidden"/>
     </Style>
 
     <!-- DataGrid Header Style -->

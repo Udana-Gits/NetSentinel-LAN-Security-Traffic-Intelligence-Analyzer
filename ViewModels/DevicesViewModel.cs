@@ -75,7 +75,7 @@ public partial class DevicesViewModel : ObservableObject
         _logger.Information("DevicesViewModel received refresh message");
         Application.Current?.Dispatcher.Invoke(async () =>
         {
-            await ScanNetwork();
+            await RefreshDevices();
         });
     }
 
@@ -96,44 +96,29 @@ public partial class DevicesViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task ScanNetwork()
+    private async Task RefreshDevices()
     {
         if (IsScanning)
             return;
 
         IsScanning = true;
-        StatusMessage = "Scanning network...";
-
-        try
-        {
-            await _deviceScanner.ScanNetworkAsync();
-        }
-        catch (Exception ex)
-        {
-            _logger.Error(ex, "Network scan failed");
-            StatusMessage = "Scan failed";
-        }
-        finally
-        {
-            IsScanning = false;
-        }
-    }
-
-    [RelayCommand]
-    private async Task RefreshDevices()
-    {
-        StatusMessage = "Refreshing current devices...";
+        StatusMessage = "Scanning network and refreshing devices...";
         
         try
         {
-            // Reload current network devices only (from current subnet)
-            var currentNetworkDevices = await _deviceScanner.GetKnownDevicesAsync();
+            // Perform an actual network scan to update LastSeen times
+            await _deviceScanner.ScanNetworkAsync();
+            
+            // Then reload all devices from database (including offline ones)
+            var allDevices = await _deviceScanner.GetKnownDevicesAsync();
             
             Application.Current?.Dispatcher.Invoke(() =>
             {
                 CurrentDevices.Clear();
                 
-                foreach (var device in currentNetworkDevices.OrderByDescending(d => d.LastSeen))
+                // Show all devices, ordered by online status first, then by LastSeen
+                foreach (var device in allDevices.OrderByDescending(d => d.IsOnline)
+                                                  .ThenByDescending(d => d.LastSeen))
                 {
                     CurrentDevices.Add(device);
                 }
@@ -146,6 +131,10 @@ public partial class DevicesViewModel : ObservableObject
         {
             _logger.Error(ex, "Failed to refresh devices");
             StatusMessage = "Refresh failed";
+        }
+        finally
+        {
+            IsScanning = false;
         }
     }
 
@@ -207,6 +196,9 @@ public partial class DevicesViewModel : ObservableObject
                 existing.Hostname = e.Device.Hostname;
                 existing.LastSeen = e.Device.LastSeen;
                 existing.IsOnline = e.Device.IsOnline;
+                existing.DeviceType = e.Device.DeviceType;
+                existing.Vendor = e.Device.Vendor;
+                existing.IsGateway = e.Device.IsGateway;
             }
             else
             {
