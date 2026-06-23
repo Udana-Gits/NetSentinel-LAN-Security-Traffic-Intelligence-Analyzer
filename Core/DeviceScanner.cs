@@ -22,7 +22,7 @@ public class DeviceScanner
     private readonly DatabaseService _database;
     private readonly NetworkManager _networkManager;
     private bool _isScanning;
-    private string? _lastKnownGateway;
+    private string? _lastKnownNetworkSignature;
 
     public event EventHandler<DeviceDiscoveredEventArgs>? DeviceDiscovered;
     public event EventHandler? ScanCompleted;
@@ -52,7 +52,7 @@ public class DeviceScanner
 
         try
         {
-            var networkInfo = _networkManager.GetCurrentInterface();
+            var networkInfo = await _networkManager.GetActiveNetworkInterfaceAsync();
             if (networkInfo == null)
             {
                 _logger.Warning("No active network interface found");
@@ -60,7 +60,7 @@ public class DeviceScanner
             }
 
             // Detect network change before scanning
-            await DetectAndHandleNetworkChangeAsync(networkInfo.Gateway);
+            await DetectAndHandleNetworkChangeAsync(networkInfo);
 
             var ipAddress = IPAddress.Parse(networkInfo.IpAddress);
             var subnetMask = IPAddress.Parse(networkInfo.SubnetMask);
@@ -188,38 +188,49 @@ public class DeviceScanner
     /// <summary>
     /// Detects if the network has changed by monitoring gateway IP
     /// </summary>
-    private async Task DetectAndHandleNetworkChangeAsync(string currentGateway)
+    private async Task DetectAndHandleNetworkChangeAsync(NetworkInterfaceInfo networkInfo)
     {
+        var currentSignature = BuildNetworkSignature(networkInfo);
+
         // First scan - initialize gateway tracking
-        if (_lastKnownGateway == null)
+        if (_lastKnownNetworkSignature == null)
         {
-            _lastKnownGateway = currentGateway;
-            _logger.Information("Network initialized with gateway: {Gateway}", currentGateway);
+            _lastKnownNetworkSignature = currentSignature;
+            _logger.Information("Network initialized: {Signature}", currentSignature);
             return;
         }
 
-        // Check if gateway has changed
-        if (_lastKnownGateway != currentGateway)
+        // Check if network identity has changed
+        if (_lastKnownNetworkSignature != currentSignature)
         {
-            _logger.Warning("Network change detected! Gateway changed from {OldGateway} to {NewGateway}",
-                _lastKnownGateway, currentGateway);
+            _logger.Warning("Network change detected! Network changed from {OldNetwork} to {NewNetwork}",
+                _lastKnownNetworkSignature, currentSignature);
 
             // Mark all current devices as offline (they're from the old network)
             await ClearDevicesFromOldNetworkAsync();
 
             // Update tracked gateway
-            var oldGateway = _lastKnownGateway;
-            _lastKnownGateway = currentGateway;
+            var oldSignature = _lastKnownNetworkSignature;
+            _lastKnownNetworkSignature = currentSignature;
 
             // Notify subscribers of network change
             NetworkChanged?.Invoke(this, new NetworkChangedEventArgs
             {
-                OldGateway = oldGateway,
-                NewGateway = currentGateway
+                OldGateway = oldSignature ?? string.Empty,
+                NewGateway = currentSignature
             });
 
             _logger.Information("Network change handled. Old devices cleared, ready for fresh scan.");
         }
+    }
+
+    /// <summary>
+    /// Builds a stable network signature to detect Wi-Fi changes more reliably than gateway-only checks.
+    /// </summary>
+    private static string BuildNetworkSignature(NetworkInterfaceInfo networkInfo)
+    {
+        var ssid = string.IsNullOrWhiteSpace(networkInfo.Ssid) ? "unknown-ssid" : networkInfo.Ssid;
+        return $"{networkInfo.Name}|{ssid}|{networkInfo.Gateway}|{networkInfo.SubnetMask}|{networkInfo.IpAddress}";
     }
 
     /// <summary>
@@ -426,6 +437,9 @@ public class DeviceScanner
     /// </summary>
     public async Task<List<NetworkDevice>> GetKnownDevicesAsync()
     {
+        // Refresh active interface snapshot to avoid stale subnet filtering after Wi-Fi changes.
+        await _networkManager.GetActiveNetworkInterfaceAsync();
+
         var allDevices = await _database.GetAllDevicesAsync();
         
         // Filter devices to only show those from current active subnet
@@ -500,6 +514,14 @@ public class DeviceScanner
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// Checks whether the active network/Wi-Fi has changed.
+    /// </summary>
+    public Task<bool> HasNetworkChangedAsync()
+    {
+        return _networkManager.HasNetworkChangedAsync();
     }
 }
 

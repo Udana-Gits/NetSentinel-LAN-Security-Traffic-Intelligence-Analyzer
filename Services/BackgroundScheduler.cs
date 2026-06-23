@@ -72,6 +72,15 @@ public class BackgroundScheduler
                 var settings = await _database.GetSettingsAsync();
                 var now = DateTime.UtcNow;
 
+                // Trigger an immediate scan when Wi-Fi/network changes.
+                var networkChanged = await _deviceScanner.HasNetworkChangedAsync();
+                if (networkChanged)
+                {
+                    _logger.Information("Network change detected by scheduler, starting immediate device scan");
+                    await _deviceScanner.ScanNetworkAsync(cancellationToken);
+                    lastDeviceScan = now;
+                }
+
                 // Auto device scan
                 if (settings.AutoScanDevices)
                 {

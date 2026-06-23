@@ -30,6 +30,8 @@ public class NetworkManager
     {
         try
         {
+            NetworkInterfaceInfo? detectedInterface = null;
+
             await Task.Run(() =>
             {
                 var interfaces = NetworkInterface.GetAllNetworkInterfaces()
@@ -69,15 +71,21 @@ public class NetworkManager
                     // Get SSID for wireless interface
                     info.Ssid = GetWirelessSsid(ni);
 
-                    _currentInterface = info;
+                    detectedInterface = info;
                     return;
                 }
             });
+
+            _currentInterface = detectedInterface;
 
             if (_currentInterface != null)
             {
                 _logger.Information("Active network interface detected: {Name} ({IP})", 
                     _currentInterface.Name, _currentInterface.IpAddress);
+            }
+            else
+            {
+                _logger.Information("No active wireless network interface detected");
             }
 
             return _currentInterface;
@@ -269,11 +277,16 @@ public class NetworkManager
         var current = _currentInterface;
         var updated = await GetActiveNetworkInterfaceAsync();
 
+        if (current == null && updated == null)
+            return false;
+
         if (current == null || updated == null)
             return true;
 
         return current.IpAddress != updated.IpAddress ||
                current.Gateway != updated.Gateway ||
-               current.MacAddress != updated.MacAddress;
+               current.MacAddress != updated.MacAddress ||
+               current.Name != updated.Name ||
+               current.Ssid != updated.Ssid;
     }
 }
