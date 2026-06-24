@@ -95,3 +95,6 @@ $RECYCLE.BIN/
 *.db-wal
 accepted_terms
 logs/
+
+# Android app directory
+AndroidApp/
