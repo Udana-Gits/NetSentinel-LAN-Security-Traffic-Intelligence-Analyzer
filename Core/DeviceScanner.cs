@@ -123,22 +123,32 @@ public class DeviceScanner
     {
         try
         {
-            // Try to ping the host - this ensures we only count actively responding devices
+            // Try to ping the host to trigger an ARP request in the OS cache
             using var ping = new Ping();
-            var reply = await ping.SendPingAsync(ipAddress, 1000);
+            IPStatus? replyStatus = null;
+            try
+            {
+                var reply = await ping.SendPingAsync(ipAddress, 1000);
+                replyStatus = reply.Status;
+            }
+            catch
+            {
+                // Ping failed to execute, ignore and continue to ARP check
+            }
 
-            // Only count device if ping is successful (not cached ARP entries)
-            if (reply.Status != IPStatus.Success)
-                return false;
-
-            // Small delay to allow ARP table to update after successful ping
+            // Small delay to allow ARP table to update after ping request
             await Task.Delay(50, cancellationToken);
 
-            // Get MAC address from ARP table (now refreshed by the ping)
+            // Get MAC address from ARP table (now populated/refreshed by the ping)
             var macAddress = GetMacAddressFromArp(ipAddress);
+            
+            // If ping did not succeed and no MAC address is resolved, the device is offline
+            if (replyStatus != IPStatus.Success && string.IsNullOrEmpty(macAddress))
+                return false;
+
             if (string.IsNullOrEmpty(macAddress))
             {
-                _logger.Debug("Ping succeeded but no MAC address found for {IP}", ipAddress);
+                _logger.Debug("No MAC address found for {IP} (ping status: {Status})", ipAddress, replyStatus);
                 return false;
             }
 

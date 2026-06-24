@@ -85,6 +85,50 @@
                 </StackPanel>
             </Border>
 
+            <!-- Brute Force Alert Thresholds (Attempts) -->
+            <Border Style="{StaticResource Card}" Margin="0,0,0,20">
+                <StackPanel>
+                    <TextBlock Text="Brute Force Alert Thresholds (Attempts)" FontSize="18" FontWeight="SemiBold" 
+                               Foreground="{StaticResource LightTextBrush}" Margin="0,0,0,20"/>
+
+                    <Grid Margin="0,0,0,15">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="300"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Info alert threshold (attempts):" 
+                                   Foreground="{StaticResource LightTextBrush}" FontSize="14" 
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1" Text="{Binding FailedLoginThresholdInfo}" 
+                                 Style="{StaticResource NumericTextBox}"/>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,15">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="300"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Warning alert threshold (attempts):" 
+                                   Foreground="{StaticResource LightTextBrush}" FontSize="14" 
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1" Text="{Binding FailedLoginThresholdWarning}" 
+                                 Style="{StaticResource NumericTextBox}"/>
+                    </Grid>
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="300"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Critical alert threshold (attempts):" 
+                                   Foreground="{StaticResource LightTextBrush}" FontSize="14" 
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1" Text="{Binding FailedLoginThresholdCritical}" 
+                                 Style="{StaticResource NumericTextBox}"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
             <!-- Actions -->
             <Border Style="{StaticResource Card}" Margin="0,0,0,20">
                 <StackPanel>

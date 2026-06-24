@@ -10,6 +10,7 @@ using CommunityToolkit.Mvvm.Messaging;
 using NetSentinel.Core;
 using NetSentinel.Data;
 using NetSentinel.Messages;
+using NetSentinel.Services;
 using Serilog;
 
 namespace NetSentinel.ViewModels;
@@ -22,6 +23,7 @@ public partial class DevicesViewModel : ObservableObject
     private readonly ILogger _logger;
     private readonly DeviceScanner _deviceScanner;
     private readonly DatabaseService _database;
+    private readonly AgentReceiver _agentReceiver;
 
     [ObservableProperty]
     private bool _isScanning;
@@ -39,20 +41,31 @@ public partial class DevicesViewModel : ObservableObject
     private string _statusMessage = "Ready";
 
     /// <summary>
-    /// Current network devices - UI binds to this collection
+    /// Current network devices - all devices on current network
     /// </summary>
     public ObservableCollection<NetworkDevice> CurrentDevices { get; set; }
+
+    /// <summary>
+    /// Online network devices - UI binds to this collection
+    /// </summary>
+    public ObservableCollection<NetworkDevice> OnlineDevicesList { get; } = new();
+
+    /// <summary>
+    /// Offline / previously connected network devices - UI binds to this collection
+    /// </summary>
+    public ObservableCollection<NetworkDevice> OfflineDevicesList { get; } = new();
     
     /// <summary>
     /// Historical devices from database - loaded on demand only
     /// </summary>
     private List<NetworkDevice>? HistoricalDevices { get; set; }
 
-    public DevicesViewModel(ILogger logger, DeviceScanner deviceScanner, DatabaseService database)
+    public DevicesViewModel(ILogger logger, DeviceScanner deviceScanner, DatabaseService database, AgentReceiver agentReceiver)
     {
         _logger = logger;
         _deviceScanner = deviceScanner;
         _database = database;
+        _agentReceiver = agentReceiver;
 
         CurrentDevices = new ObservableCollection<NetworkDevice>();
         HistoricalDevices = null; // Not loaded initially
@@ -60,11 +73,14 @@ public partial class DevicesViewModel : ObservableObject
         _deviceScanner.DeviceDiscovered += OnDeviceDiscovered;
         _deviceScanner.ScanCompleted += OnScanCompleted;
         _deviceScanner.NetworkChanged += OnNetworkChanged;
+        
+        _agentReceiver.TelemetryReceived += OnTelemetryReceived;
 
         // Register for global refresh messages
         WeakReferenceMessenger.Default.Register<RefreshDevicesMessage>(this, (r, m) => HandleRefreshMessage());
 
-        // Don't auto-load devices - wait for network scan
+        // Load devices from database asynchronously on startup
+        _ = InitializeDevicesAsync();
     }
 
     /// <summary>
@@ -116,14 +132,16 @@ public partial class DevicesViewModel : ObservableObject
             {
                 CurrentDevices.Clear();
                 
-                // Show all devices, ordered by online status first, then by LastSeen
+                // Show all devices, ordered by online status first, then by IsGateway, then by LastSeen
                 foreach (var device in allDevices.OrderByDescending(d => d.IsOnline)
+                                                  .ThenByDescending(d => d.IsGateway)
                                                   .ThenByDescending(d => d.LastSeen))
                 {
                     CurrentDevices.Add(device);
                 }
 
                 UpdateCounts();
+                RefreshViewCollections();
                 StatusMessage = "Ready";
             });
         }
@@ -171,24 +189,136 @@ public partial class DevicesViewModel : ObservableObject
 
     partial void OnFilterTextChanged(string value)
     {
-        ApplyFilter();
+        RefreshViewCollections();
     }
 
-    private void ApplyFilter()
+    private void RefreshViewCollections()
     {
-        // Note: Filtering is now handled by the UI binding directly
-        // CurrentDevices contains only devices from the current network
-        // No additional filtering needed at ViewModel level for network separation
-        
-        // If text filtering is needed, it would filter CurrentDevices collection
-        // For now, CurrentDevices shows all devices from current network without text filtering
+        var filter = FilterText?.Trim();
+        var allDevices = CurrentDevices.ToList();
+
+        var onlineFiltered = allDevices
+            .Where(d => d.IsOnline && MatchesFilter(d, filter))
+            .OrderByDescending(d => d.IsGateway)
+            .ThenByDescending(d => d.LastSeen)
+            .ToList();
+
+        var offlineFiltered = allDevices
+            .Where(d => !d.IsOnline && MatchesFilter(d, filter))
+            .OrderByDescending(d => d.LastSeen)
+            .ToList();
+
+        SyncCollection(OnlineDevicesList, onlineFiltered);
+        SyncCollection(OfflineDevicesList, offlineFiltered);
+    }
+
+    private bool MatchesFilter(NetworkDevice device, string? filter)
+    {
+        if (string.IsNullOrWhiteSpace(filter))
+            return true;
+
+        return (device.IpAddress?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false) ||
+               (device.MacAddress?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false) ||
+               (device.Vendor?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false) ||
+               (device.Hostname?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false);
+    }
+
+    private void SyncCollection(ObservableCollection<NetworkDevice> target, List<NetworkDevice> source)
+    {
+        target.Clear();
+        foreach (var item in source)
+        {
+            target.Add(item);
+        }
+    }
+
+    /// <summary>
+    /// Pre-loads devices from database on startup
+    /// </summary>
+    private async Task InitializeDevicesAsync()
+    {
+        try
+        {
+            var allDevices = await _deviceScanner.GetKnownDevicesAsync();
+            Application.Current?.Dispatcher.Invoke(() =>
+            {
+                CurrentDevices.Clear();
+                foreach (var device in allDevices)
+                {
+                    CurrentDevices.Add(device);
+                }
+                UpdateCounts();
+                RefreshViewCollections();
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.Error(ex, "Failed to initialize devices from database on startup");
+        }
+    }
+
+    /// <summary>
+    /// Handles real-time telemetry updates from NetSentinel mobile agents
+    /// </summary>
+    private void OnTelemetryReceived(object? sender, AgentTelemetryReceivedEventArgs e)
+    {
+        if (e?.Telemetry?.DeviceInfo == null)
+            return;
+
+        var ip = e.Telemetry.DeviceInfo.IpAddress;
+        var mac = e.Telemetry.DeviceInfo.MacAddress?.Trim().ToUpperInvariant();
+
+        Task.Run(async () =>
+        {
+            try
+            {
+                // Fetch the fully resolved device record from DB
+                var dbDevice = await _database.GetDeviceByIpAsync(ip);
+                if (dbDevice == null && !string.IsNullOrEmpty(mac))
+                {
+                    dbDevice = await _database.GetDeviceByMacAsync(mac);
+                }
+
+                if (dbDevice != null)
+                {
+                    Application.Current?.Dispatcher.Invoke(() =>
+                    {
+                        var existing = CurrentDevices.FirstOrDefault(d => 
+                            d.MacAddress.Equals(dbDevice.MacAddress, StringComparison.OrdinalIgnoreCase) ||
+                            (!string.IsNullOrEmpty(d.IpAddress) && d.IpAddress.Equals(dbDevice.IpAddress, StringComparison.OrdinalIgnoreCase)));
+
+                        if (existing != null)
+                        {
+                            existing.IpAddress = dbDevice.IpAddress;
+                            existing.Hostname = dbDevice.Hostname;
+                            existing.LastSeen = dbDevice.LastSeen;
+                            existing.IsOnline = dbDevice.IsOnline;
+                            existing.DeviceType = dbDevice.DeviceType;
+                            existing.Vendor = dbDevice.Vendor;
+                            existing.IsGateway = dbDevice.IsGateway;
+                        }
+                        else
+                        {
+                            CurrentDevices.Add(dbDevice);
+                        }
+
+                        UpdateCounts();
+                        RefreshViewCollections();
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Error(ex, "Error handling telemetry update in DevicesViewModel");
+            }
+        });
     }
 
     private void OnDeviceDiscovered(object? sender, DeviceDiscoveredEventArgs e)
     {
         Application.Current?.Dispatcher.Invoke(() =>
         {
-            var existing = CurrentDevices.FirstOrDefault(d => d.MacAddress == e.Device.MacAddress);
+            var existing = CurrentDevices.FirstOrDefault(d => d.MacAddress.Equals(e.Device.MacAddress, StringComparison.OrdinalIgnoreCase));
             if (existing != null)
             {
                 // Update existing device in current network
@@ -207,6 +337,7 @@ public partial class DevicesViewModel : ObservableObject
             }
 
             UpdateCounts();
+            RefreshViewCollections();
         });
     }
 
@@ -230,6 +361,7 @@ public partial class DevicesViewModel : ObservableObject
             CurrentDevices.Clear();
             
             UpdateCounts();
+            RefreshViewCollections();
             StatusMessage = $"Network changed to {e.NewGateway}. Ready to scan.";
         });
     }

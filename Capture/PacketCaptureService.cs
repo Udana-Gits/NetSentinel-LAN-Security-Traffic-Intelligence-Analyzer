@@ -23,6 +23,23 @@ public class PacketCaptureService
     private bool _isCapturing;
     private CancellationTokenSource? _cts;
 
+    private readonly List<SniffedConnection> _activeFlows = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _resolvedDomains = new();
+
+    public List<SniffedConnection> ActiveFlows
+    {
+        get
+        {
+            lock (_activeFlows)
+            {
+                return new List<SniffedConnection>(_activeFlows);
+            }
+        }
+    }
+
+    public event EventHandler<HttpLoginEventArgs>? HttpLoginAttemptDetected;
+    public event EventHandler<HttpLoginFailureEventArgs>? HttpLoginFailureDetected;
+
     private long _totalPackets;
     private long _tcpPackets;
     private long _udpPackets;
@@ -209,6 +226,13 @@ public class PacketCaptureService
     /// </summary>
     private void ProcessIpPacket(IPPacket ipPacket)
     {
+        string sourceIp = ipPacket.SourceAddress.ToString();
+        string destIp = ipPacket.DestinationAddress.ToString();
+        int srcPort = 0;
+        int destPort = 0;
+        string protocol = "IP";
+        byte[] payloadData = Array.Empty<byte>();
+
         // TCP
         if (ipPacket.Protocol == ProtocolType.Tcp)
         {
@@ -219,10 +243,15 @@ public class PacketCaptureService
 
             if (ipPacket.PayloadPacket is TcpPacket tcpPacket)
             {
+                srcPort = tcpPacket.SourcePort;
+                destPort = tcpPacket.DestinationPort;
+                protocol = "TCP";
+                payloadData = tcpPacket.PayloadData;
+
                 // Check for DNS over TCP (port 53)
                 if (tcpPacket.SourcePort == 53 || tcpPacket.DestinationPort == 53)
                 {
-                    ProcessDnsPacket(tcpPacket.PayloadData);
+                    ProcessDnsPacket(tcpPacket.PayloadData, sourceIp);
                 }
             }
         }
@@ -236,10 +265,14 @@ public class PacketCaptureService
 
             if (ipPacket.PayloadPacket is UdpPacket udpPacket)
             {
+                srcPort = udpPacket.SourcePort;
+                destPort = udpPacket.DestinationPort;
+                protocol = "UDP";
+
                 // Check for DNS (port 53)
                 if (udpPacket.SourcePort == 53 || udpPacket.DestinationPort == 53)
                 {
-                    ProcessDnsPacket(udpPacket.PayloadData);
+                    ProcessDnsPacket(udpPacket.PayloadData, sourceIp);
                 }
             }
         }
@@ -249,6 +282,23 @@ public class PacketCaptureService
             lock (_statsLock)
             {
                 _icmpPackets++;
+            }
+        }
+
+        // Track active connection flows (excluding loopbacks)
+        if (srcPort > 0 && destPort > 0 && sourceIp != "127.0.0.1" && destIp != "127.0.0.1")
+        {
+            UpdateFlow(sourceIp, srcPort, destIp, destPort, protocol);
+
+            // Check for unencrypted HTTP login forms (port 80)
+            if (destPort == 80 && payloadData != null && payloadData.Length > 0)
+            {
+                ProcessHttpPacket(payloadData, sourceIp);
+            }
+            // Check for unencrypted HTTP responses (port 80 source port)
+            else if (srcPort == 80 && payloadData != null && payloadData.Length > 0)
+            {
+                ProcessHttpResponsePacket(payloadData, destIp, sourceIp);
             }
         }
     }
@@ -285,7 +335,7 @@ public class PacketCaptureService
     /// <summary>
     /// Processes DNS packets (basic extraction)
     /// </summary>
-    private void ProcessDnsPacket(byte[] payload)
+    private void ProcessDnsPacket(byte[] payload, string sourceIp)
     {
         try
         {
@@ -314,6 +364,7 @@ public class PacketCaptureService
                     DnsQueryDetected?.Invoke(this, new DnsQueryEventArgs
                     {
                         Query = query,
+                        SourceIp = sourceIp,
                         Timestamp = DateTime.UtcNow
                     });
                 }
@@ -430,6 +481,192 @@ public class PacketCaptureService
             };
         }
     }
+
+    public string ResolveDomainName(string ipAddress)
+    {
+        if (string.IsNullOrEmpty(ipAddress) || ipAddress == "0.0.0.0" || ipAddress == "127.0.0.1" || ipAddress == "*")
+            return ipAddress;
+
+        if (_resolvedDomains.TryGetValue(ipAddress, out var domain))
+        {
+            return domain;
+        }
+
+        // Run reverse DNS in background to avoid blocking packet processing
+        Task.Run(() =>
+        {
+            try
+            {
+                var host = System.Net.Dns.GetHostEntry(ipAddress);
+                var name = host.HostName;
+                _resolvedDomains[ipAddress] = name;
+            }
+            catch
+            {
+                _resolvedDomains[ipAddress] = ipAddress; // Cache IP as fallback to prevent repeated retries
+            }
+        });
+
+        return ipAddress;
+    }
+
+    private void UpdateFlow(string srcIp, int srcPort, string destIp, int destPort, string protocol)
+    {
+        var now = DateTime.UtcNow;
+        lock (_activeFlows)
+        {
+            // Prune old flows (older than 25 seconds)
+            _activeFlows.RemoveAll(f => (now - f.LastSeen).TotalSeconds > 25);
+
+            var existing = _activeFlows.FirstOrDefault(f => 
+                f.SourceIp == srcIp && f.SourcePort == srcPort && 
+                f.DestinationIp == destIp && f.DestinationPort == destPort);
+
+            if (existing != null)
+            {
+                existing.LastSeen = now;
+            }
+            else
+            {
+                _activeFlows.Add(new SniffedConnection
+                {
+                    SourceIp = srcIp,
+                    SourcePort = srcPort,
+                    DestinationIp = destIp,
+                    DestinationPort = destPort,
+                    Protocol = protocol,
+                    LastSeen = now
+                });
+            }
+        }
+    }
+
+    private void ProcessHttpPacket(byte[] payload, string sourceIp)
+    {
+        try
+        {
+            if (payload == null || payload.Length < 40) return;
+
+            var text = System.Text.Encoding.ASCII.GetString(payload);
+            // Check if it's a HTTP POST request
+            if (text.StartsWith("POST ", StringComparison.OrdinalIgnoreCase))
+            {
+                // Check if it's a login attempt by scanning form parameters
+                if (text.Contains("password=") || text.Contains("passwd=") || text.Contains("pwd=") || text.Contains("pass="))
+                {
+                    var host = ExtractHostHeader(text);
+                    var username = ExtractCredential(text, new[] { "username", "user", "email", "login", "id" });
+
+                    HttpLoginAttemptDetected?.Invoke(this, new HttpLoginEventArgs
+                    {
+                        SourceIp = sourceIp,
+                        Website = host,
+                        Username = username,
+                        Timestamp = DateTime.UtcNow
+                    });
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.Debug(ex, "Error processing HTTP login payload");
+        }
+    }
+
+    private void ProcessHttpResponsePacket(byte[] payload, string clientIp, string serverIp)
+    {
+        try
+        {
+            if (payload == null || payload.Length < 40) return;
+
+            var text = System.Text.Encoding.ASCII.GetString(payload);
+            
+            // Check if it looks like an HTTP response and contains login failure keywords
+            if (text.StartsWith("HTTP/", StringComparison.OrdinalIgnoreCase))
+            {
+                var lowerText = text.ToLowerInvariant();
+                var loginErrorKeywords = new[] {
+                    "email and password do not match",
+                    "emails and passwords do not match",
+                    "username and password do not match",
+                    "user and password do not match",
+                    "credentials do not match",
+                    "incorrect password",
+                    "incorrect credentials",
+                    "invalid credentials",
+                    "invalid username or password",
+                    "invalid email or password",
+                    "wrong password",
+                    "password you entered is incorrect",
+                    "wrong email or password",
+                    "authentication failed",
+                    "wrong credentials",
+                    "credentials you entered are invalid"
+                };
+
+                if (loginErrorKeywords.Any(k => lowerText.Contains(k)))
+                {
+                    var website = ResolveDomainName(serverIp);
+                    if (string.IsNullOrEmpty(website) || website == serverIp)
+                    {
+                        website = "HTTP Web Service";
+                    }
+
+                    HttpLoginFailureDetected?.Invoke(this, new HttpLoginFailureEventArgs
+                    {
+                        SourceIp = clientIp,
+                        Website = website,
+                        Timestamp = DateTime.UtcNow
+                    });
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.Debug(ex, "Error processing HTTP response payload");
+        }
+    }
+
+    private string ExtractHostHeader(string httpText)
+    {
+        var lines = httpText.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+        var hostLine = lines.FirstOrDefault(l => l.StartsWith("Host:", StringComparison.OrdinalIgnoreCase));
+        if (hostLine != null)
+        {
+            return hostLine.Substring(5).Trim();
+        }
+        return "Unknown Website";
+    }
+
+    private string ExtractCredential(string httpText, string[] keys)
+    {
+        // Find empty line marking start of HTTP body
+        var bodyIndex = httpText.IndexOf("\r\n\r\n");
+        if (bodyIndex < 0) return "unknown";
+
+        var body = httpText.Substring(bodyIndex + 4);
+        var pairs = body.Split('&');
+        foreach (var pair in pairs)
+        {
+            var parts = pair.Split('=');
+            if (parts.Length == 2)
+            {
+                var paramName = parts[0].ToLowerInvariant();
+                if (keys.Any(k => paramName.Contains(k)))
+                {
+                    try
+                    {
+                        return Uri.UnescapeDataString(parts[1]);
+                    }
+                    catch
+                    {
+                        return parts[1];
+                    }
+                }
+            }
+        }
+        return "unknown";
+    }
 }
 
 /// <summary>
@@ -447,6 +684,7 @@ public class PacketCapturedEventArgs : EventArgs
 public class DnsQueryEventArgs : EventArgs
 {
     public string Query { get; set; } = string.Empty;
+    public string SourceIp { get; set; } = string.Empty;
     public DateTime Timestamp { get; set; }
 }
 
@@ -459,4 +697,38 @@ public class ArpEventArgs : EventArgs
     public string SenderMacAddress { get; set; } = string.Empty;
     public string TargetIpAddress { get; set; } = string.Empty;
     public bool IsRequest { get; set; }
+}
+
+/// <summary>
+/// HTTP login attempt details
+/// </summary>
+public class HttpLoginEventArgs : EventArgs
+{
+    public string SourceIp { get; set; } = string.Empty;
+    public string Website { get; set; } = string.Empty;
+    public string Username { get; set; } = string.Empty;
+    public DateTime Timestamp { get; set; }
+}
+
+/// <summary>
+/// Sniffed network connection flow
+/// </summary>
+public class SniffedConnection
+{
+    public string SourceIp { get; set; } = string.Empty;
+    public int SourcePort { get; set; }
+    public string DestinationIp { get; set; } = string.Empty;
+    public int DestinationPort { get; set; }
+    public string Protocol { get; set; } = "TCP";
+    public DateTime LastSeen { get; set; }
+}
+
+/// <summary>
+/// HTTP login failure details
+/// </summary>
+public class HttpLoginFailureEventArgs : EventArgs
+{
+    public string SourceIp { get; set; } = string.Empty;
+    public string Website { get; set; } = string.Empty;
+    public DateTime Timestamp { get; set; }
 }

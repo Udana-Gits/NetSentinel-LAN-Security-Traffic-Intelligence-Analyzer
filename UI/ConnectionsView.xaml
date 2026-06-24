@@ -65,42 +65,149 @@
                 </Grid.ColumnDefinitions>
 
                 <TextBox Grid.Column="0" Text="{Binding FilterText, UpdateSourceTrigger=PropertyChanged}" 
-                        Style="{StaticResource ModernTextBox}" Margin="0,0,15,0"/>
+                         Style="{StaticResource ModernTextBox}" Margin="0,0,15,0"/>
 
                 <ComboBox Grid.Column="1" ItemsSource="{Binding ProtocolFilters}" 
-                         SelectedItem="{Binding SelectedProtocol}"
-                         Style="{StaticResource ModernComboBox}" Margin="0,0,15,0"/>
+                          SelectedItem="{Binding SelectedProtocol}"
+                          Style="{StaticResource ModernComboBox}" Margin="0,0,15,0"/>
 
                 <Button Grid.Column="2" Content="Refresh" Style="{StaticResource ModernButton}" 
-                       Command="{Binding RefreshCommand}"/>
+                        Command="{Binding RefreshCommand}"/>
             </Grid>
         </Border>
 
-        <!-- Connections Table -->
-        <Border Style="{StaticResource Card}" Grid.Row="3">
-            <DataGrid ItemsSource="{Binding Connections}" 
-             Style="{StaticResource ModernDataGrid}"
-             FontSize="14"
-             HorizontalAlignment="Stretch"
-             HorizontalContentAlignment="Stretch"
-             GridLinesVisibility="None">
-                <DataGrid.ColumnHeaderStyle>
-                    <Style TargetType="DataGridColumnHeader" BasedOn="{StaticResource DataGridColumnHeaderStyle}">
-                        <Setter Property="FontWeight" Value="Bold"/>
-                        <Setter Property="Padding" Value="10,5"/>
-                    </Style>
-                </DataGrid.ColumnHeaderStyle>
-                <DataGrid.Columns>
-                    <DataGridTextColumn Header="Process" Binding="{Binding ProcessName}" Width="2*"/>
-                    <DataGridTextColumn Header="PID" Binding="{Binding ProcessId}" Width="*"/>
-                    <DataGridTextColumn Header="Protocol" Binding="{Binding Protocol}" Width="*"/>
-                    <DataGridTextColumn Header="Local Address" Binding="{Binding LocalAddress}" Width="2*"/>
-                    <DataGridTextColumn Header="Local Port" Binding="{Binding LocalPort}" Width="*"/>
-                    <DataGridTextColumn Header="Remote Address" Binding="{Binding RemoteAddress}" Width="2*"/>
-                    <DataGridTextColumn Header="Remote Port" Binding="{Binding RemotePort}" Width="*"/>
-                    <DataGridTextColumn Header="State" Binding="{Binding State}" Width="*"/>
-                </DataGrid.Columns>
-            </DataGrid>
-        </Border>
+        <!-- Devices Connections List -->
+        <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto">
+            <ItemsControl ItemsSource="{Binding Devices}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <!-- A Border card for each device -->
+                        <Border Style="{StaticResource Card}" Margin="0,0,0,20" Padding="0">
+                            <Expander IsExpanded="{Binding IsExpanded, Mode=TwoWay}" 
+                                      Background="Transparent" 
+                                      BorderThickness="0" 
+                                      HorizontalAlignment="Stretch" 
+                                      HorizontalContentAlignment="Stretch">
+                                <Expander.Header>
+                                    <Grid HorizontalAlignment="Stretch" Margin="10,10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        
+                                        <!-- Device Icon -->
+                                        <TextBlock Grid.Column="0" FontSize="20" Margin="0,0,15,0" VerticalAlignment="Center">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding DeviceType}" Value="Laptop">
+                                                            <Setter Property="Text" Value="💻"/>
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding DeviceType}" Value="Mobile">
+                                                            <Setter Property="Text" Value="📱"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+
+                                        <!-- Device Name & IP -->
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding DeviceName}" FontSize="16" FontWeight="Bold" Foreground="{StaticResource LightTextBrush}"/>
+                                            <TextBlock Text="{Binding IpAddress, StringFormat='IP: {0}'}" FontSize="12" Foreground="{StaticResource MutedTextBrush}" Margin="0,2,0,0"/>
+                                        </StackPanel>
+
+                                        <!-- Quick Connection Stats -->
+                                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
+                                            <Border CornerRadius="4" Background="#1E293B" Padding="8,4" Margin="0,0,10,0">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="Connections: " FontSize="12" Foreground="{StaticResource MutedTextBrush}"/>
+                                                    <TextBlock Text="{Binding TotalConnections}" FontSize="12" FontWeight="Bold" Foreground="{StaticResource LightTextBrush}"/>
+                                                </StackPanel>
+                                            </Border>
+                                            <Border CornerRadius="4" Background="#1E293B" Padding="8,4">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="TCP: " FontSize="12" Foreground="{StaticResource MutedTextBrush}"/>
+                                                    <TextBlock Text="{Binding TcpConnections}" FontSize="12" FontWeight="Bold" Foreground="{StaticResource LightTextBrush}"/>
+                                                </StackPanel>
+                                            </Border>
+                                        </StackPanel>
+                                    </Grid>
+                                </Expander.Header>
+
+                                <!-- Expanded Connections Grid -->
+                                <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="15">
+                                    <StackPanel>
+                                        <!-- Active Connections (User Activity) -->
+                                        <TextBlock Text="Active Connections (User Activity)" 
+                                                   FontWeight="Bold" FontSize="14" Foreground="#10B981" 
+                                                   Margin="5,0,0,10"/>
+                                        <DataGrid ItemsSource="{Binding ActiveConnections}" 
+                                                  Style="{StaticResource ModernDataGrid}"
+                                                  MaxHeight="250"
+                                                  FontSize="13"
+                                                  HorizontalAlignment="Stretch"
+                                                  HorizontalContentAlignment="Stretch"
+                                                  GridLinesVisibility="None"
+                                                  HeadersVisibility="Column"
+                                                  IsReadOnly="True"
+                                                  Margin="0,0,0,20">
+                                            <DataGrid.ColumnHeaderStyle>
+                                                <Style TargetType="DataGridColumnHeader" BasedOn="{StaticResource DataGridColumnHeaderStyle}">
+                                                    <Setter Property="FontWeight" Value="Bold"/>
+                                                    <Setter Property="Padding" Value="10,5"/>
+                                                </Style>
+                                            </DataGrid.ColumnHeaderStyle>
+                                            <DataGrid.Columns>
+                                                <DataGridTextColumn Header="Process/App" Binding="{Binding ProcessName}" Width="2*"/>
+                                                <DataGridTextColumn Header="PID" Binding="{Binding ProcessId}" Width="*"/>
+                                                <DataGridTextColumn Header="Protocol" Binding="{Binding Protocol}" Width="*"/>
+                                                <DataGridTextColumn Header="Local Address" Binding="{Binding LocalAddress}" Width="2*"/>
+                                                <DataGridTextColumn Header="Local Port" Binding="{Binding LocalPort}" Width="*"/>
+                                                <DataGridTextColumn Header="Remote Address" Binding="{Binding RemoteAddress}" Width="2*"/>
+                                                <DataGridTextColumn Header="Remote Port" Binding="{Binding RemotePort}" Width="*"/>
+                                                <DataGridTextColumn Header="State" Binding="{Binding State}" Width="*"/>
+                                            </DataGrid.Columns>
+                                        </DataGrid>
+
+                                        <!-- Background Connections (System / Service Traffic) -->
+                                        <TextBlock Text="Background Connections (System / Service Traffic)" 
+                                                   FontWeight="Bold" FontSize="14" Foreground="#64748B" 
+                                                   Margin="5,0,0,10"/>
+                                        <DataGrid ItemsSource="{Binding BackgroundConnections}" 
+                                                  Style="{StaticResource ModernDataGrid}"
+                                                  MaxHeight="250"
+                                                  FontSize="13"
+                                                  HorizontalAlignment="Stretch"
+                                                  HorizontalContentAlignment="Stretch"
+                                                  GridLinesVisibility="None"
+                                                  HeadersVisibility="Column"
+                                                  IsReadOnly="True">
+                                            <DataGrid.ColumnHeaderStyle>
+                                                <Style TargetType="DataGridColumnHeader" BasedOn="{StaticResource DataGridColumnHeaderStyle}">
+                                                    <Setter Property="FontWeight" Value="Bold"/>
+                                                    <Setter Property="Padding" Value="10,5"/>
+                                                </Style>
+                                            </DataGrid.ColumnHeaderStyle>
+                                            <DataGrid.Columns>
+                                                <DataGridTextColumn Header="Process/App" Binding="{Binding ProcessName}" Width="2*"/>
+                                                <DataGridTextColumn Header="PID" Binding="{Binding ProcessId}" Width="*"/>
+                                                <DataGridTextColumn Header="Protocol" Binding="{Binding Protocol}" Width="*"/>
+                                                <DataGridTextColumn Header="Local Address" Binding="{Binding LocalAddress}" Width="2*"/>
+                                                <DataGridTextColumn Header="Local Port" Binding="{Binding LocalPort}" Width="*"/>
+                                                <DataGridTextColumn Header="Remote Address" Binding="{Binding RemoteAddress}" Width="2*"/>
+                                                <DataGridTextColumn Header="Remote Port" Binding="{Binding RemotePort}" Width="*"/>
+                                                <DataGridTextColumn Header="State" Binding="{Binding State}" Width="*"/>
+                                            </DataGrid.Columns>
+                                        </DataGrid>
+                                    </StackPanel>
+                                </Border>
+                            </Expander>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
     </Grid>
 </UserControl>

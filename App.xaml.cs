@@ -67,6 +67,7 @@ public partial class App : Application
                     // Register Services
                     services.AddSingleton<AlertService>();
                     services.AddSingleton<BackgroundScheduler>();
+                    services.AddSingleton<AgentReceiver>();
 
                     // Register ViewModels
                     services.AddSingleton<DashboardViewModel>();
@@ -155,6 +156,7 @@ public partial class App : Application
             var scheduler = _host.Services.GetRequiredService<BackgroundScheduler>();
             var packetCapture = _host.Services.GetRequiredService<PacketCaptureService>();
             var database = _host.Services.GetRequiredService<DatabaseService>();
+            var agentReceiver = _host.Services.GetRequiredService<AgentReceiver>();
 
             // Get settings
             var settings = await database.GetSettingsAsync();
@@ -184,6 +186,9 @@ public partial class App : Application
                 }
             }
 
+            // Start agent receiver for mobile telemetry
+            await agentReceiver.StartAsync(5095);
+
             _logger?.Information("All background services started");
         }
         catch (Exception ex)
@@ -206,12 +211,14 @@ public partial class App : Application
                 var securityEngine = _host.Services.GetService<SecurityEngine>();
                 var scheduler = _host.Services.GetService<BackgroundScheduler>();
                 var packetCapture = _host.Services.GetService<PacketCaptureService>();
+                var agentReceiver = _host.Services.GetService<AgentReceiver>();
 
                 bandwidthMonitor?.Stop();
                 connectionMonitor?.Stop();
                 securityEngine?.Stop();
                 scheduler?.Stop();
                 packetCapture?.StopCapture();
+                agentReceiver?.Stop();
 
                 _host.Dispose();
             }

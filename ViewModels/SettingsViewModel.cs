@@ -45,6 +45,15 @@ public partial class SettingsViewModel : ObservableObject
     private int _connectionCountThreshold;
 
     [ObservableProperty]
+    private int _failedLoginThresholdInfo;
+
+    [ObservableProperty]
+    private int _failedLoginThresholdWarning;
+
+    [ObservableProperty]
+    private int _failedLoginThresholdCritical;
+
+    [ObservableProperty]
     private string _statusMessage = "Ready";
 
     public SettingsViewModel(ILogger logger, DatabaseService database, DeviceScanner deviceScanner)
@@ -72,6 +81,9 @@ public partial class SettingsViewModel : ObservableObject
             AutoStartWithWindows = _settings.AutoStartWithWindows;
             TrafficSpikeThreshold = _settings.TrafficSpikeThreshold;
             ConnectionCountThreshold = _settings.ConnectionCountThreshold;
+            FailedLoginThresholdInfo = _settings.FailedLoginThresholdInfo;
+            FailedLoginThresholdWarning = _settings.FailedLoginThresholdWarning;
+            FailedLoginThresholdCritical = _settings.FailedLoginThresholdCritical;
 
             _logger.Information("Settings loaded");
         }
@@ -97,6 +109,9 @@ public partial class SettingsViewModel : ObservableObject
             _settings.AutoStartWithWindows = AutoStartWithWindows;
             _settings.TrafficSpikeThreshold = TrafficSpikeThreshold;
             _settings.ConnectionCountThreshold = ConnectionCountThreshold;
+            _settings.FailedLoginThresholdInfo = FailedLoginThresholdInfo;
+            _settings.FailedLoginThresholdWarning = FailedLoginThresholdWarning;
+            _settings.FailedLoginThresholdCritical = FailedLoginThresholdCritical;
 
             await _database.UpdateSettingsAsync(_settings);
 

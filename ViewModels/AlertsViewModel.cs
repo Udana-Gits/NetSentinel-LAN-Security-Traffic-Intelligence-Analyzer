@@ -14,13 +14,48 @@ using Serilog;
 namespace NetSentinel.ViewModels;
 
 /// <summary>
+/// ViewModel representing security alerts for a specific device
+/// </summary>
+public partial class DeviceAlertsGroup : ObservableObject
+{
+    [ObservableProperty]
+    private string _deviceName = string.Empty;
+
+    [ObservableProperty]
+    private string _ipAddress = string.Empty;
+
+    [ObservableProperty]
+    private string _deviceType = "Other"; // "Laptop", "Mobile", "Other", "Network"
+
+    [ObservableProperty]
+    private int _alertCount;
+
+    [ObservableProperty]
+    private int _criticalCount;
+
+    [ObservableProperty]
+    private int _warningCount;
+
+    [ObservableProperty]
+    private int _infoCount;
+
+    [ObservableProperty]
+    private bool _isExpanded = true;
+
+    public ObservableCollection<SecurityAlert> Alerts { get; set; } = new();
+}
+
+/// <summary>
 /// ViewModel for the alerts view
 /// </summary>
 public partial class AlertsViewModel : ObservableObject
 {
+    private static readonly DateTime AppStartupTime = DateTime.UtcNow;
+
     private readonly ILogger _logger;
     private readonly AlertService _alertService;
     private readonly DatabaseService _database;
+    private readonly AgentReceiver _agentReceiver;
 
     [ObservableProperty]
     private int _totalAlerts;
@@ -44,17 +79,20 @@ public partial class AlertsViewModel : ObservableObject
     private bool _showOnlyUnread;
 
     public ObservableCollection<SecurityAlert> Alerts { get; set; }
+    public ObservableCollection<DeviceAlertsGroup> DeviceGroups { get; set; }
     private readonly ObservableCollection<SecurityAlert> _allAlerts;
 
     public string[] SeverityFilters { get; } = { "All", "Critical", "Warning", "Info" };
 
-    public AlertsViewModel(ILogger logger, AlertService alertService, DatabaseService database)
+    public AlertsViewModel(ILogger logger, AlertService alertService, DatabaseService database, AgentReceiver agentReceiver)
     {
         _logger = logger;
         _alertService = alertService;
         _database = database;
+        _agentReceiver = agentReceiver;
 
         Alerts = new ObservableCollection<SecurityAlert>();
+        DeviceGroups = new ObservableCollection<DeviceAlertsGroup>();
         _allAlerts = new ObservableCollection<SecurityAlert>();
 
         _alertService.AlertRaised += OnAlertRaised;
@@ -87,7 +125,7 @@ public partial class AlertsViewModel : ObservableObject
             {
                 _allAlerts.Clear();
                 
-                foreach (var alert in alerts.OrderByDescending(a => a.Timestamp))
+                foreach (var alert in alerts.Where(a => a.Timestamp >= AppStartupTime).OrderByDescending(a => a.Timestamp))
                 {
                     _allAlerts.Add(alert);
                 }
@@ -173,10 +211,8 @@ public partial class AlertsViewModel : ObservableObject
 
     private void ApplyFilters()
     {
-        Application.Current?.Dispatcher.Invoke(() =>
+        Application.Current?.Dispatcher.Invoke(async () =>
         {
-            Alerts.Clear();
-
             var filtered = _allAlerts.AsEnumerable();
 
             // Severity filter
@@ -201,20 +237,132 @@ public partial class AlertsViewModel : ObservableObject
                 );
             }
 
-            foreach (var alert in filtered)
+            var localIp = GetLocalIPAddress();
+
+            var filteredList = filtered.ToList();
+
+            Alerts.Clear();
+            foreach (var alert in filteredList)
             {
                 Alerts.Add(alert);
             }
+
+            // Fetch devices to get vendors and types
+            System.Collections.Generic.List<NetworkDevice> devices = new();
+            try
+            {
+                devices = await _database.GetAllDevicesAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.Error(ex, "Failed to load devices for alerts grouping");
+            }
+
+            // Group by SourceIp
+            var groupedAlerts = filteredList
+                .GroupBy(a => a.SourceIp ?? string.Empty)
+                .ToList();
+
+            var activeIpGroups = new System.Collections.Generic.HashSet<string>();
+
+            foreach (var group in groupedAlerts)
+            {
+                var sourceIp = group.Key;
+                activeIpGroups.Add(sourceIp);
+
+                var deviceGroup = DeviceGroups.FirstOrDefault(dg => dg.IpAddress == sourceIp);
+                if (deviceGroup == null)
+                {
+                    deviceGroup = new DeviceAlertsGroup
+                    {
+                        IpAddress = sourceIp
+                    };
+                    DeviceGroups.Add(deviceGroup);
+                }
+
+                // Identify device properties
+                if (string.IsNullOrEmpty(sourceIp))
+                {
+                    deviceGroup.DeviceName = "Network & System Alerts";
+                    deviceGroup.DeviceType = "Network";
+                }
+                else if (sourceIp == "127.0.0.1" || sourceIp == localIp)
+                {
+                    deviceGroup.DeviceName = "Local Laptop (This PC)";
+                    deviceGroup.DeviceType = "Laptop";
+                }
+                else
+                {
+                    var dev = devices.FirstOrDefault(d => d.IpAddress == sourceIp);
+                    if (dev != null)
+                    {
+                        deviceGroup.DeviceName = !string.IsNullOrEmpty(dev.Vendor) ? dev.Vendor : (dev.Hostname ?? $"Device {sourceIp}");
+                        deviceGroup.DeviceType = dev.DeviceType.ToString();
+                    }
+                    else
+                    {
+                        deviceGroup.DeviceName = $"Unknown Device ({sourceIp})";
+                        deviceGroup.DeviceType = "Other";
+                    }
+                }
+
+                // Sync alerts inside this group
+                var sortedAlerts = group.OrderByDescending(a => a.Timestamp).ToList();
+                deviceGroup.Alerts.Clear();
+                foreach (var alert in sortedAlerts)
+                {
+                    deviceGroup.Alerts.Add(alert);
+                }
+
+                deviceGroup.AlertCount = sortedAlerts.Count;
+                deviceGroup.CriticalCount = sortedAlerts.Count(a => a.Severity == AlertSeverity.Critical);
+                deviceGroup.WarningCount = sortedAlerts.Count(a => a.Severity == AlertSeverity.Warning);
+                deviceGroup.InfoCount = sortedAlerts.Count(a => a.Severity == AlertSeverity.Info);
+                deviceGroup.IsExpanded = sortedAlerts.Count > 0;
+            }
+
+            // Remove groups that have no matching alerts under current filters
+            var toRemove = DeviceGroups.Where(dg => !activeIpGroups.Contains(dg.IpAddress)).ToList();
+            foreach (var dg in toRemove)
+            {
+                DeviceGroups.Remove(dg);
+            }
         });
+    }
+
+    private string GetLocalIPAddress()
+    {
+        try
+        {
+            using (var socket = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.InterNetwork, System.Net.Sockets.SocketType.Dgram, 0))
+            {
+                socket.Connect("8.8.8.8", 65530);
+                if (socket.LocalEndPoint is System.Net.IPEndPoint endPoint)
+                {
+                    return endPoint.Address.ToString();
+                }
+            }
+        }
+        catch { }
+        return "127.0.0.1";
     }
 
     private void OnAlertRaised(object? sender, AlertRaisedEventArgs e)
     {
         Application.Current?.Dispatcher.Invoke(() =>
         {
-            _allAlerts.Insert(0, e.Alert);
-            UpdateStatistics();
-            ApplyFilters();
+            var existing = _allAlerts.FirstOrDefault(a => a.Id == e.Alert.Id);
+            if (existing != null)
+            {
+                _allAlerts.Remove(existing);
+            }
+            
+            if (e.Alert.Timestamp >= AppStartupTime)
+            {
+                _allAlerts.Insert(0, e.Alert);
+                UpdateStatistics();
+                ApplyFilters();
+            }
         });
     }
 

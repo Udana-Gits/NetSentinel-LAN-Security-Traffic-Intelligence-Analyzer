@@ -26,12 +26,15 @@ namespace NetSentinel.ViewModels;
 /// </summary>
 public partial class DashboardViewModel : ObservableObject
 {
+    private static readonly DateTime AppStartupTime = DateTime.UtcNow;
     private readonly ILogger _logger;
     private readonly NetworkManager _networkManager;
     private readonly BandwidthMonitor _bandwidthMonitor;
     private readonly DeviceScanner _deviceScanner;
     private readonly ConnectionMonitor _connectionMonitor;
     private readonly AlertService _alertService;
+    private readonly SecurityEngine _securityEngine;
+    private readonly AgentReceiver _agentReceiver;
     private readonly System.Windows.Threading.DispatcherTimer _updateTimer;
 
     [ObservableProperty]
@@ -96,7 +99,9 @@ public partial class DashboardViewModel : ObservableObject
         BandwidthMonitor bandwidthMonitor,
         DeviceScanner deviceScanner,
         ConnectionMonitor connectionMonitor,
-        AlertService alertService)
+        AlertService alertService,
+        SecurityEngine securityEngine,
+        AgentReceiver agentReceiver)
     {
         _logger = logger;
         _networkManager = networkManager;
@@ -104,6 +109,8 @@ public partial class DashboardViewModel : ObservableObject
         _deviceScanner = deviceScanner;
         _connectionMonitor = connectionMonitor;
         _alertService = alertService;
+        _securityEngine = securityEngine;
+        _agentReceiver = agentReceiver;
 
         _uploadData = new ObservableCollection<DateTimePoint>();
         _downloadData = new ObservableCollection<DateTimePoint>();
@@ -206,7 +213,11 @@ public partial class DashboardViewModel : ObservableObject
             var devices = await _deviceScanner.GetKnownDevicesAsync();
             DeviceCount = devices.Count(d => d.IsOnline);
 
-            UnreadAlertsCount = await _alertService.GetUnreadCountAsync();
+            var allRecentAlerts = await _alertService.GetRecentAlertsAsync(1000);
+            UnreadAlertsCount = allRecentAlerts.Count(a => 
+                !a.IsRead && 
+                a.Timestamp >= AppStartupTime
+            );
             
             // Measure ping to gateway
             await MeasurePingAsync();
@@ -325,12 +336,17 @@ public partial class DashboardViewModel : ObservableObject
 
     private async Task LoadRecentAlertsAsync()
     {
-        var alerts = await _alertService.GetRecentAlertsAsync(5);
+        var alerts = await _alertService.GetRecentAlertsAsync(100);
+
+        var filteredAlerts = alerts
+            .Where(a => a.Timestamp >= AppStartupTime)
+            .Take(5)
+            .ToList();
         
         Application.Current?.Dispatcher.Invoke(() =>
         {
             RecentAlerts.Clear();
-            foreach (var alert in alerts)
+            foreach (var alert in filteredAlerts)
             {
                 RecentAlerts.Add(alert);
             }

@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using NetSentinel.Data;
 using NetSentinel.Services;
+using NetSentinel.Capture;
 using Serilog;
 
 namespace NetSentinel.Core;
@@ -21,6 +22,7 @@ public class SecurityEngine
     private readonly BandwidthMonitor _bandwidthMonitor;
     private readonly ConnectionMonitor _connectionMonitor;
     private readonly DeviceScanner _deviceScanner;
+    private readonly PacketCaptureService _packetCapture;
 
     private readonly List<SecurityRule> _rules;
     private string? _lastKnownGatewayMac;
@@ -59,7 +61,8 @@ public class SecurityEngine
         NetworkManager networkManager,
         BandwidthMonitor bandwidthMonitor,
         ConnectionMonitor connectionMonitor,
-        DeviceScanner deviceScanner)
+        DeviceScanner deviceScanner,
+        PacketCaptureService packetCapture)
     {
         _logger = logger;
         _database = database;
@@ -68,6 +71,7 @@ public class SecurityEngine
         _bandwidthMonitor = bandwidthMonitor;
         _connectionMonitor = connectionMonitor;
         _deviceScanner = deviceScanner;
+        _packetCapture = packetCapture;
 
         _rules = InitializeDefaultRules();
         _knownDeviceMacs = new HashSet<string>();
@@ -124,6 +128,16 @@ public class SecurityEngine
                 IsEnabled = true,
                 ThresholdValue = 0, // Dynamic baseline calculation
                 EvaluationInterval = TimeSpan.FromSeconds(5)
+            },
+            new SecurityRule
+            {
+                Name = "Port Scan Detected",
+                Description = "Alerts when a device connects to more than 8 distinct ports on another host",
+                Type = RuleType.PortScan,
+                Severity = AlertSeverity.Warning,
+                IsEnabled = true,
+                ThresholdValue = 8,
+                EvaluationInterval = TimeSpan.FromSeconds(10)
             }
         };
     }
@@ -154,6 +168,10 @@ public class SecurityEngine
             }
         }
 
+        _packetCapture.DnsQueryDetected += OnDnsQueryDetected;
+        _packetCapture.HttpLoginAttemptDetected += OnHttpLoginAttemptDetected;
+        _packetCapture.HttpLoginFailureDetected += OnHttpLoginFailureDetected;
+
         _ = Task.Run(() => EvaluationLoopAsync(_cts.Token), _cts.Token);
         
         _logger.Information("Security engine started with {RuleCount} active rules", _rules.Count(r => r.IsEnabled));
@@ -171,6 +189,10 @@ public class SecurityEngine
         _cts?.Cancel();
         _cts?.Dispose();
         _cts = null;
+
+        _packetCapture.DnsQueryDetected -= OnDnsQueryDetected;
+        _packetCapture.HttpLoginAttemptDetected -= OnHttpLoginAttemptDetected;
+        _packetCapture.HttpLoginFailureDetected -= OnHttpLoginFailureDetected;
 
         _logger.Information("Security engine stopped");
     }
@@ -219,6 +241,8 @@ public class SecurityEngine
     {
         try
         {
+            var settings = await _database.GetSettingsAsync();
+
             switch (rule.Type)
             {
                 case RuleType.GatewayMacChange:
@@ -230,11 +254,15 @@ public class SecurityEngine
                     break;
 
                 case RuleType.TrafficSpike:
-                    await CheckTrafficSpikeAsync(rule.ThresholdValue);
+                    await CheckTrafficSpikeAsync(settings.TrafficSpikeThreshold);
                     break;
 
                 case RuleType.ExcessiveConnections:
-                    await CheckExcessiveConnectionsAsync();
+                    await CheckExcessiveConnectionsAsync(settings.ConnectionCountThreshold);
+                    break;
+
+                case RuleType.PortScan:
+                    await CheckPortScanAsync(rule.ThresholdValue);
                     break;
             }
         }
@@ -476,6 +504,8 @@ public class SecurityEngine
         var uploadSpeed = _bandwidthMonitor.CurrentUploadSpeedKbps;
         var downloadSpeed = _bandwidthMonitor.CurrentDownloadSpeedKbps;
 
+        var localIp = GetLocalIPAddress();
+
         if (uploadSpeed > thresholdKbps)
         {
             await _alertService.RaiseAlertAsync(new SecurityAlert
@@ -483,7 +513,8 @@ public class SecurityEngine
                 Timestamp = DateTime.UtcNow,
                 Severity = AlertSeverity.Warning,
                 Title = "High Upload Traffic Detected",
-                Description = $"Upload speed exceeded threshold: {uploadSpeed:F2} KB/s (threshold: {thresholdKbps} KB/s)"
+                Description = $"Upload speed exceeded threshold: {uploadSpeed:F2} KB/s (threshold: {thresholdKbps} KB/s)",
+                SourceIp = localIp
             });
         }
 
@@ -494,15 +525,16 @@ public class SecurityEngine
                 Timestamp = DateTime.UtcNow,
                 Severity = AlertSeverity.Warning,
                 Title = "High Download Traffic Detected",
-                Description = $"Download speed exceeded threshold: {downloadSpeed:F2} KB/s (threshold: {thresholdKbps} KB/s)"
+                Description = $"Download speed exceeded threshold: {downloadSpeed:F2} KB/s (threshold: {thresholdKbps} KB/s)",
+                SourceIp = localIp
             });
         }
     }
 
     /// <summary>
-    /// Checks for excessive connections using dynamic baseline calculation
+    /// Checks for excessive connections using dynamic baseline calculation and absolute limit
     /// </summary>
-    private async Task CheckExcessiveConnectionsAsync()
+    private async Task CheckExcessiveConnectionsAsync(int minThreshold)
     {
         var stats = _connectionMonitor.GetStatistics();
         var now = DateTime.UtcNow;
@@ -535,8 +567,8 @@ public class SecurityEngine
         _logger.Debug("Connection check - Current: {Current}, Baseline: {Baseline:F1}, Threshold: {Threshold:F1}, Hotspot: {IsHotspot}",
             currentConnections, baselineAverage, dynamicThreshold, _isHotspotMode);
 
-        // Check if current connections exceed threshold
-        if (currentConnections > dynamicThreshold)
+        // Check if current connections exceed threshold and absolute minimum threshold
+        if (currentConnections > dynamicThreshold && currentConnections > minThreshold)
         {
             // Apply debounce - only alert if 30 seconds have passed since last alert
             var timeSinceLastAlert = (now - _lastExcessiveConnectionAlert).TotalSeconds;
@@ -555,12 +587,342 @@ public class SecurityEngine
                 Severity = AlertSeverity.Warning,
                 Title = "Excessive Network Connections",
                 Description = $"Connection count ({currentConnections}) exceeds baseline threshold ({dynamicThreshold:F0}). " +
-                             $"Baseline average: {baselineAverage:F1} connections over {BaselineWindowSeconds}s."
+                             $"Baseline average: {baselineAverage:F1} connections over {BaselineWindowSeconds}s.",
+                SourceIp = GetLocalIPAddress()
             });
 
             _logger.Warning("Excessive connections alert raised: Current={Current}, Baseline={Baseline:F1}, Threshold={Threshold:F1}",
                 currentConnections, baselineAverage, dynamicThreshold);
         }
+    }
+
+    // Track last port scan alerts to debounce
+    private readonly Dictionary<string, DateTime> _lastPortScanAlert = new();
+
+    private async Task CheckPortScanAsync(int thresholdPorts)
+    {
+        var activeConnections = _connectionMonitor.ActiveConnections;
+        if (activeConnections == null || activeConnections.Count == 0)
+            return;
+
+        var now = DateTime.UtcNow;
+
+        // Detect Inbound Scan (Remote IP scanning multiple Local Ports)
+        var remoteGroups = activeConnections
+            .Where(c => !string.IsNullOrEmpty(c.RemoteAddress) && c.RemoteAddress != "0.0.0.0" && c.RemoteAddress != "127.0.0.1" && c.RemoteAddress != "*")
+            .GroupBy(c => c.RemoteAddress);
+
+        foreach (var group in remoteGroups)
+        {
+            var remoteIp = group.Key;
+            var distinctPorts = group.Select(c => c.LocalPort).Distinct().ToList();
+
+            if (distinctPorts.Count > thresholdPorts)
+            {
+                lock (_lastPortScanAlert)
+                {
+                    if (_lastPortScanAlert.TryGetValue(remoteIp, out var lastAlert) && (now - lastAlert).TotalSeconds < 30)
+                    {
+                        continue;
+                    }
+                    _lastPortScanAlert[remoteIp] = now;
+                }
+
+                var devices = await _deviceScanner.GetKnownDevicesAsync();
+                var dev = devices.FirstOrDefault(d => d.IpAddress == remoteIp);
+                var deviceName = dev != null ? $"{dev.Vendor} ({remoteIp})" : remoteIp;
+
+                await _alertService.RaiseAlertAsync(new SecurityAlert
+                {
+                    Timestamp = now,
+                    Severity = AlertSeverity.Warning,
+                    Title = "Inbound Port Scan Detected",
+                    Description = $"Host {deviceName} attempted connections to {distinctPorts.Count} distinct local ports. This is highly indicative of network reconnaissance (port scanning).",
+                    SourceIp = remoteIp,
+                    SourceMac = dev?.MacAddress
+                });
+            }
+        }
+
+        // Detect Outbound Scan (Our host scanning a remote IP's multiple ports)
+        var localGroups = activeConnections
+            .Where(c => !string.IsNullOrEmpty(c.RemoteAddress) && c.RemoteAddress != "0.0.0.0" && c.RemoteAddress != "127.0.0.1" && c.RemoteAddress != "*")
+            .GroupBy(c => c.RemoteAddress);
+
+        foreach (var group in localGroups)
+        {
+            var remoteIp = group.Key;
+            var distinctRemotePorts = group.Select(c => c.RemotePort).Distinct().ToList();
+
+            if (distinctRemotePorts.Count > thresholdPorts)
+            {
+                lock (_lastPortScanAlert)
+                {
+                    if (_lastPortScanAlert.TryGetValue(remoteIp, out var lastAlert) && (now - lastAlert).TotalSeconds < 30)
+                    {
+                        continue;
+                    }
+                    _lastPortScanAlert[remoteIp] = now;
+                }
+
+                await _alertService.RaiseAlertAsync(new SecurityAlert
+                {
+                    Timestamp = now,
+                    Severity = AlertSeverity.Warning,
+                    Title = "Outbound Port Scan Activity",
+                    Description = $"Local processes are connecting to {distinctRemotePorts.Count} distinct ports on remote host {remoteIp}. Possible local compromise or port scan tool active.",
+                    SourceIp = GetLocalIPAddress()
+                });
+            }
+        }
+    }
+
+    private string GetLocalIPAddress()
+    {
+        try
+        {
+            using (var socket = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.InterNetwork, System.Net.Sockets.SocketType.Dgram, 0))
+            {
+                socket.Connect("8.8.8.8", 65530);
+                if (socket.LocalEndPoint is System.Net.IPEndPoint endPoint)
+                {
+                    return endPoint.Address.ToString();
+                }
+            }
+        }
+        catch { }
+        return "127.0.0.1";
+    }
+
+    // Track Facebook brute force queries: SourceIp -> (List of Timestamps)
+    private readonly Dictionary<string, List<DateTime>> _fbDnsTracker = new();
+    private readonly object _fbTrackerLock = new();
+    private readonly Dictionary<string, DateTime> _lastFbAlertTime = new();
+
+    private void OnDnsQueryDetected(object? sender, DnsQueryEventArgs e)
+    {
+        if (string.IsNullOrEmpty(e.SourceIp) || string.IsNullOrEmpty(e.Query))
+            return;
+
+        var query = e.Query.ToLowerInvariant();
+        if (query.Contains("facebook.com") || query.Contains("fbcdn.net"))
+        {
+            var now = DateTime.UtcNow;
+            int count = 0;
+
+            lock (_fbTrackerLock)
+            {
+                if (!_fbDnsTracker.TryGetValue(e.SourceIp, out var timestamps))
+                {
+                    timestamps = new List<DateTime>();
+                    _fbDnsTracker[e.SourceIp] = timestamps;
+                }
+
+                timestamps.Add(now);
+                timestamps.RemoveAll(t => (now - t).TotalSeconds > 60);
+                count = timestamps.Count;
+            }
+
+            if (count >= 15)
+            {
+                _ = RaiseFacebookAlertDebouncedAsync(e.SourceIp, count);
+            }
+        }
+    }
+
+    private async Task RaiseFacebookAlertDebouncedAsync(string ipAddress, int count)
+    {
+        var now = DateTime.UtcNow;
+        lock (_fbTrackerLock)
+        {
+            if (_lastFbAlertTime.TryGetValue(ipAddress, out var lastAlert) && (now - lastAlert).TotalSeconds < 30)
+            {
+                return;
+            }
+            _lastFbAlertTime[ipAddress] = now;
+        }
+
+        var devices = await _deviceScanner.GetKnownDevicesAsync();
+        var dev = devices.FirstOrDefault(d => d.IpAddress == ipAddress);
+        var deviceName = dev != null ? $"{dev.Vendor} ({ipAddress})" : ipAddress;
+
+        await _alertService.RaiseAlertAsync(new SecurityAlert
+        {
+            Timestamp = now,
+            Severity = AlertSeverity.Critical,
+            Title = "Potential Facebook Brute Force",
+            Description = $"Device {deviceName} made {count} rapid requests to Facebook domains in the last 60 seconds, indicating a potential brute-force or unauthorized credential stuffing attack.",
+            SourceIp = ipAddress,
+            SourceMac = dev?.MacAddress
+        });
+    }
+
+    // Track HTTP login attempts: "SourceIp|Website" -> List of timestamps
+    private readonly Dictionary<string, List<DateTime>> _loginTracker = new();
+    private readonly object _loginTrackerLock = new();
+    private readonly Dictionary<string, DateTime> _lastBruteForceAlertTime = new();
+
+    // Track local HTTP login failures: "SourceIp|Website" -> FailedLoginTracker
+    private readonly Dictionary<string, FailedLoginTracker> _localFailedLoginTrackers = new();
+    private readonly object _localFailedLoginTrackersLock = new();
+
+    private void OnHttpLoginAttemptDetected(object? sender, HttpLoginEventArgs e)
+    {
+        if (string.IsNullOrEmpty(e.SourceIp) || string.IsNullOrEmpty(e.Website))
+            return;
+
+        _ = ProcessHttpLoginAttemptAsync(e);
+    }
+
+    private void OnHttpLoginFailureDetected(object? sender, HttpLoginFailureEventArgs e)
+    {
+        if (string.IsNullOrEmpty(e.SourceIp) || string.IsNullOrEmpty(e.Website))
+            return;
+
+        _ = ProcessLocalLoginFailureAsync(e.SourceIp, e.Website);
+    }
+
+    public async Task ProcessLocalLoginFailureAsync(string sourceIp, string website)
+    {
+        var now = DateTime.UtcNow;
+        var settings = await _database.GetSettingsAsync();
+        int thresholdCritical = settings.FailedLoginThresholdCritical;
+        int thresholdWarning = settings.FailedLoginThresholdWarning;
+        int thresholdInfo = settings.FailedLoginThresholdInfo;
+
+        // Get source device MAC address if possible
+        var devices = await _deviceScanner.GetKnownDevicesAsync();
+        var dev = devices.FirstOrDefault(d => d.IpAddress == sourceIp);
+        var sourceMac = dev?.MacAddress;
+        var deviceName = dev != null ? $"{dev.Vendor} ({sourceIp})" : sourceIp;
+
+        var key = $"{sourceIp}|{website.ToLowerInvariant()}";
+        FailedLoginTracker tracker;
+        lock (_localFailedLoginTrackersLock)
+        {
+            if (!_localFailedLoginTrackers.TryGetValue(key, out tracker!))
+            {
+                tracker = new FailedLoginTracker();
+                _localFailedLoginTrackers[key] = tracker;
+            }
+        }
+
+        lock (tracker)
+        {
+            // Clean up timestamps older than 5 minutes from this attempt
+            var windowCutoff = now.AddMinutes(-5);
+            tracker.Timestamps.RemoveAll(t => t < windowCutoff);
+
+            // Add this attempt
+            tracker.Timestamps.Add(now);
+
+            int count = tracker.Timestamps.Count;
+
+            if (count >= thresholdCritical)
+            {
+                _ = _alertService.RaiseAlertAsync(new SecurityAlert
+                {
+                    Timestamp = now,
+                    Severity = AlertSeverity.Critical,
+                    Title = $"Password Brute Force Suspected: {website}",
+                    Description = $"Device {deviceName} had {count} failed login attempts on '{website}' within the last 5 minutes. This indicates a potential brute-force attack.",
+                    SourceIp = sourceIp,
+                    SourceMac = sourceMac
+                });
+            }
+            else if (count >= thresholdWarning)
+            {
+                _ = _alertService.RaiseAlertAsync(new SecurityAlert
+                {
+                    Timestamp = now,
+                    Severity = AlertSeverity.Warning,
+                    Title = $"Multiple Login Failures: {website}",
+                    Description = $"Device {deviceName} had {count} failed login attempts on '{website}' within the last 5 minutes. Please verify if this is authorized activity.",
+                    SourceIp = sourceIp,
+                    SourceMac = sourceMac
+                });
+            }
+            else if (count >= thresholdInfo)
+            {
+                _ = _alertService.RaiseAlertAsync(new SecurityAlert
+                {
+                    Timestamp = now,
+                    Severity = AlertSeverity.Info,
+                    Title = $"Login Failure Detected: {website}",
+                    Description = $"Device {deviceName} failed to login on '{website}'.",
+                    SourceIp = sourceIp,
+                    SourceMac = sourceMac
+                });
+            }
+        }
+    }
+
+    private async Task ProcessHttpLoginAttemptAsync(HttpLoginEventArgs e)
+    {
+        var now = DateTime.UtcNow;
+
+        // 1. Get source device MAC address if possible
+        var devices = await _deviceScanner.GetKnownDevicesAsync();
+        var dev = devices.FirstOrDefault(d => d.IpAddress == e.SourceIp);
+        var sourceMac = dev?.MacAddress;
+        var deviceName = dev != null ? $"{dev.Vendor} ({e.SourceIp})" : e.SourceIp;
+
+        // 2. Raise individual warning alert for each login attempt
+        await _alertService.RaiseAlertAsync(new SecurityAlert
+        {
+            Timestamp = now,
+            Severity = AlertSeverity.Warning,
+            Title = "HTTP Login Attempt",
+            Description = $"Unencrypted HTTP login attempt on {e.Website} by user '{e.Username}' from device {deviceName}.",
+            SourceIp = e.SourceIp,
+            SourceMac = sourceMac
+        });
+
+        // 3. Track brute force threshold: > 5 attempts to same website within 30 seconds
+        int count = 0;
+        var key = $"{e.SourceIp}|{e.Website.ToLowerInvariant()}";
+        lock (_loginTrackerLock)
+        {
+            if (!_loginTracker.TryGetValue(key, out var timestamps))
+            {
+                timestamps = new List<DateTime>();
+                _loginTracker[key] = timestamps;
+            }
+            timestamps.Add(now);
+            timestamps.RemoveAll(t => (now - t).TotalSeconds > 30);
+            count = timestamps.Count;
+        }
+
+        if (count > 5)
+        {
+            await RaiseBruteForceAlertDebouncedAsync(e.SourceIp, sourceMac, deviceName, e.Website, count);
+        }
+    }
+
+    private async Task RaiseBruteForceAlertDebouncedAsync(string ipAddress, string? sourceMac, string deviceName, string website, int count)
+    {
+        var now = DateTime.UtcNow;
+        var alertKey = $"{ipAddress}|{website.ToLowerInvariant()}";
+        lock (_loginTrackerLock)
+        {
+            if (_lastBruteForceAlertTime.TryGetValue(alertKey, out var lastAlert) && (now - lastAlert).TotalSeconds < 30)
+            {
+                return;
+            }
+            _lastBruteForceAlertTime[alertKey] = now;
+        }
+
+        await _alertService.RaiseAlertAsync(new SecurityAlert
+        {
+            Timestamp = now,
+            Severity = AlertSeverity.Critical,
+            Title = $"Credential Brute Force Attack: {website}",
+            Description = $"Device {deviceName} is suspected of brute-forcing credentials on {website}. Detected {count} login attempts within 30 seconds.",
+            SourceIp = ipAddress,
+            SourceMac = sourceMac
+        });
+
+        _logger.Warning("CRITICAL: Brute force attack detected from {IP} on {Website}! Attempt count: {Count}", ipAddress, website, count);
     }
 
     /// <summary>

@@ -70,99 +70,240 @@
                         Style="{StaticResource ModernTextBox}" Margin="0,0,15,0"/>
 
                 <ComboBox Grid.Column="1" ItemsSource="{Binding SeverityFilters}" 
-                         SelectedItem="{Binding SelectedSeverity}"
-                         Style="{StaticResource ModernComboBox}" Margin="0,0,15,0"/>
+                          SelectedItem="{Binding SelectedSeverity}"
+                          Style="{StaticResource ModernComboBox}" Margin="0,0,15,0"/>
 
                 <CheckBox Grid.Column="2" Content="Unread Only" IsChecked="{Binding ShowOnlyUnread}"
-                         Style="{StaticResource ModernCheckBox}" VerticalAlignment="Center" Margin="0,0,15,0"/>
+                          Style="{StaticResource ModernCheckBox}" VerticalAlignment="Center" Margin="0,0,15,0"/>
 
-                <Button Grid.Column="3" Content="Mark All Read" Style="{StaticResource ModernButton}" 
-                       Command="{Binding MarkAllAsReadCommand}" Margin="0,0,10,0"/>
+                <Button Grid.Column="3" Content="Mark All Read" Style="{StaticResource DarkBlueButton}" 
+                        Command="{Binding MarkAllAsReadCommand}" Margin="0,0,10,0"/>
 
-                <Button Grid.Column="4" Content="Export CSV" Style="{StaticResource ModernButton}" 
-                       Command="{Binding ExportAlertsCommand}"/>
+                <Button Grid.Column="4" Content="Export new and previous alerts as CSV" Style="{StaticResource DarkBlueButton}" 
+                        Command="{Binding ExportAlertsCommand}"/>
             </Grid>
         </Border>
 
-        <!-- Alerts List -->
-        <Border Style="{StaticResource Card}" Grid.Row="3">
-            <ScrollViewer VerticalScrollBarVisibility="Hidden">
-                <ItemsControl ItemsSource="{Binding Alerts}">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <Border Background="{StaticResource DarkBgBrush}" CornerRadius="8" 
-                                   Padding="20" Margin="0,0,0,15" Cursor="Hand">
-                                <Border.InputBindings>
-                                    <MouseBinding MouseAction="LeftClick" 
-                                                 Command="{Binding DataContext.MarkAsReadCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                 CommandParameter="{Binding}"/>
-                                </Border.InputBindings>
-                                
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-
-                                    <!-- Severity Badge -->
-                                    <Border Grid.Column="0" CornerRadius="8" Padding="12,6" Margin="0,0,20,0" 
-                                           VerticalAlignment="Top">
-                                        <Border.Style>
-                                            <Style TargetType="Border">
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding Severity}" Value="Critical">
-                                                        <Setter Property="Background" Value="#DC2626"/>
-                                                    </DataTrigger>
-                                                    <DataTrigger Binding="{Binding Severity}" Value="Warning">
-                                                        <Setter Property="Background" Value="#F59E0B"/>
-                                                    </DataTrigger>
-                                                    <DataTrigger Binding="{Binding Severity}" Value="Info">
-                                                        <Setter Property="Background" Value="#3B82F6"/>
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </Border.Style>
-                                        <TextBlock Text="{Binding Severity}" FontSize="12" FontWeight="Bold" 
-                                                  Foreground="White"/>
-                                    </Border>
-
-                                    <!-- Content -->
-                                    <StackPanel Grid.Column="1">
-                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                                            <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="SemiBold" 
-                                                      Foreground="{StaticResource LightTextBrush}" Margin="0,0,8,0"/>
-                                            <TextBlock Text="[NEW]" FontSize="11" Foreground="#F59E0B" FontWeight="Bold"
-                                                      VerticalAlignment="Center"
-                                                      Visibility="{Binding IsRead, Converter={StaticResource InverseBoolToVisConverter}}"/>
-                                        </StackPanel>
+        <!-- Grouped Alerts List by Device -->
+        <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto">
+            <ItemsControl ItemsSource="{Binding DeviceGroups}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <!-- Collapsible Expander Card for each device's alerts -->
+                        <Border Style="{StaticResource Card}" Margin="0,0,0,20" Padding="0">
+                            <Expander IsExpanded="{Binding IsExpanded, Mode=TwoWay}" 
+                                      Background="Transparent" 
+                                      BorderThickness="0" 
+                                      HorizontalAlignment="Stretch" 
+                                      HorizontalContentAlignment="Stretch">
+                                <Expander.Header>
+                                    <Grid HorizontalAlignment="Stretch" Margin="10,10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
                                         
-                                        <TextBlock Text="{Binding Description}" FontSize="13" 
-                                                  Foreground="{StaticResource MutedTextBrush}" 
-                                                  TextWrapping="Wrap" Margin="0,0,0,12"/>
-                                        
-                                        <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="{Binding Timestamp, Converter={StaticResource UtcToLocalTimeConverter}, StringFormat='Time: {0:yyyy-MM-dd HH:mm:ss}'}" 
-                                                      FontSize="12" Foreground="{StaticResource MutedTextBrush}"/>
-                                            <TextBlock Text="{Binding SourceIp, StringFormat=' | Source IP: {0}'}" 
-                                                      FontSize="12" Foreground="{StaticResource MutedTextBrush}"
-                                                      Visibility="{Binding SourceIp, Converter={StaticResource NullToVisibilityConverter}}"/>
-                                            <TextBlock Text="{Binding SourceMac, StringFormat=' | MAC: {0}'}" 
-                                                      FontSize="12" Foreground="{StaticResource MutedTextBrush}"
-                                                      Visibility="{Binding SourceMac, Converter={StaticResource NullToVisibilityConverter}}"/>
-                                        </StackPanel>
-                                    </StackPanel>
+                                        <!-- Device Type Icon -->
+                                        <TextBlock Grid.Column="0" FontSize="20" Margin="0,0,15,0" VerticalAlignment="Center">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding DeviceType}" Value="Laptop">
+                                                            <Setter Property="Text" Value="💻"/>
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding DeviceType}" Value="Mobile">
+                                                            <Setter Property="Text" Value="📱"/>
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding DeviceType}" Value="Network">
+                                                            <Setter Property="Text" Value="🌐"/>
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding DeviceType}" Value="Other">
+                                                            <Setter Property="Text" Value="❓"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
 
-                                    <!-- Unread Indicator -->
-                                    <Ellipse Grid.Column="2" Width="12" Height="12" Fill="{StaticResource ElectricBlueBrush}" 
-                                            VerticalAlignment="Top" Margin="15,0,0,0"
-                                            Visibility="{Binding IsRead, Converter={StaticResource InverseBoolToVisConverter}}"/>
-                                </Grid>
-                            </Border>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </ScrollViewer>
-        </Border>
+                                        <!-- Device Name & IP -->
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding DeviceName}" FontSize="16" FontWeight="Bold" Foreground="{StaticResource LightTextBrush}"/>
+                                            <TextBlock Text="{Binding IpAddress, StringFormat='IP: {0}'}" FontSize="12" Foreground="{StaticResource MutedTextBrush}" Margin="0,2,0,0">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IpAddress}" Value="">
+                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </StackPanel>
+
+                                        <!-- Severity Badges -->
+                                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,10,0">
+                                            <!-- Critical Badge -->
+                                            <Border CornerRadius="4" Background="#DC2626" Padding="8,4" Margin="0,0,10,0">
+                                                <Border.Style>
+                                                    <Style TargetType="Border">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding CriticalCount}" Value="0">
+                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Border.Style>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="Critical: " FontSize="11" FontWeight="SemiBold" Foreground="White"/>
+                                                    <TextBlock Text="{Binding CriticalCount}" FontSize="11" FontWeight="Bold" Foreground="White"/>
+                                                </StackPanel>
+                                            </Border>
+
+                                            <!-- Warning Badge -->
+                                            <Border CornerRadius="4" Background="#F59E0B" Padding="8,4" Margin="0,0,10,0">
+                                                <Border.Style>
+                                                    <Style TargetType="Border">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding WarningCount}" Value="0">
+                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Border.Style>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="Warning: " FontSize="11" FontWeight="SemiBold" Foreground="White"/>
+                                                    <TextBlock Text="{Binding WarningCount}" FontSize="11" FontWeight="Bold" Foreground="White"/>
+                                                </StackPanel>
+                                            </Border>
+
+                                            <!-- Info Badge -->
+                                            <Border CornerRadius="4" Background="#3B82F6" Padding="8,4" Margin="0,0,10,0">
+                                                <Border.Style>
+                                                    <Style TargetType="Border">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding InfoCount}" Value="0">
+                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Border.Style>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="Info: " FontSize="11" FontWeight="SemiBold" Foreground="White"/>
+                                                    <TextBlock Text="{Binding InfoCount}" FontSize="11" FontWeight="Bold" Foreground="White"/>
+                                                </StackPanel>
+                                            </Border>
+
+                                            <!-- Total Badge -->
+                                            <Border CornerRadius="4" Background="#334155" Padding="8,4">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="Total: " FontSize="11" FontWeight="SemiBold" Foreground="White"/>
+                                                    <TextBlock Text="{Binding AlertCount}" FontSize="11" FontWeight="Bold" Foreground="White"/>
+                                                </StackPanel>
+                                            </Border>
+                                        </StackPanel>
+                                    </Grid>
+                                </Expander.Header>
+
+                                <!-- Expanded list of alerts for this device -->
+                                <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="15,15,15,5">
+                                    <ItemsControl ItemsSource="{Binding Alerts}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Background="{StaticResource DarkBgBrush}" CornerRadius="8" 
+                                                       Padding="20" Margin="0,0,0,15" Cursor="Hand">
+                                                    <Border.InputBindings>
+                                                        <MouseBinding MouseAction="LeftClick" 
+                                                                     Command="{Binding DataContext.MarkAsReadCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                                     CommandParameter="{Binding}"/>
+                                                    </Border.InputBindings>
+                                                    
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                            <ColumnDefinition Width="*"/>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                        </Grid.ColumnDefinitions>
+
+                                                        <!-- Severity Badge -->
+                                                        <Border Grid.Column="0" CornerRadius="8" Padding="12,6" Margin="0,0,20,0" 
+                                                               VerticalAlignment="Top">
+                                                            <Border.Style>
+                                                                <Style TargetType="Border">
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding Severity}" Value="Critical">
+                                                                            <Setter Property="Background" Value="#DC2626"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding Severity}" Value="Warning">
+                                                                            <Setter Property="Background" Value="#F59E0B"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding Severity}" Value="Info">
+                                                                            <Setter Property="Background" Value="#3B82F6"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </Border.Style>
+                                                            <TextBlock Text="{Binding Severity}" FontSize="12" FontWeight="Bold" Foreground="White"/>
+                                                        </Border>
+
+                                                        <!-- Content -->
+                                                        <StackPanel Grid.Column="1">
+                                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                                                <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="SemiBold" 
+                                                                          Foreground="{StaticResource LightTextBrush}" Margin="0,0,8,0"/>
+
+                                                                <!-- Middle Count Badge -->
+                                                                <Border CornerRadius="4" Background="{StaticResource DarkPurpleBrush}" 
+                                                                        Padding="6,2" Margin="0,0,8,0" VerticalAlignment="Center">
+                                                                    <Border.Style>
+                                                                        <Style TargetType="Border">
+                                                                            <Style.Triggers>
+                                                                                <DataTrigger Binding="{Binding Count}" Value="1">
+                                                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                                                </DataTrigger>
+                                                                                <DataTrigger Binding="{Binding Count}" Value="0">
+                                                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                                                </DataTrigger>
+                                                                            </Style.Triggers>
+                                                                        </Style>
+                                                                    </Border.Style>
+                                                                    <TextBlock Text="{Binding Count, StringFormat='{}Count: {0}'}" FontSize="10" FontWeight="Bold" Foreground="White"/>
+                                                                </Border>
+
+                                                                <TextBlock Text="[NEW]" FontSize="11" Foreground="#F59E0B" FontWeight="Bold"
+                                                                          VerticalAlignment="Center"
+                                                                          Visibility="{Binding IsRead, Converter={StaticResource InverseBoolToVisConverter}}"/>
+                                                            </StackPanel>
+                                                            
+                                                            <TextBlock Text="{Binding Description}" FontSize="13" 
+                                                                      Foreground="{StaticResource MutedTextBrush}" 
+                                                                      TextWrapping="Wrap" Margin="0,0,0,12"/>
+                                                            
+                                                            <StackPanel Orientation="Horizontal">
+                                                                <TextBlock Text="{Binding Timestamp, Converter={StaticResource UtcToLocalTimeConverter}, StringFormat='Time: {0:yyyy-MM-dd HH:mm:ss}'}" 
+                                                                          FontSize="12" Foreground="{StaticResource MutedTextBrush}"/>
+                                                                <TextBlock Text="{Binding SourceMac, StringFormat=' | MAC: {0}'}" 
+                                                                          FontSize="12" Foreground="{StaticResource MutedTextBrush}"
+                                                                          Visibility="{Binding SourceMac, Converter={StaticResource NullToVisibilityConverter}}"/>
+                                                            </StackPanel>
+                                                        </StackPanel>
+
+                                                        <!-- Right Column Indicators -->
+                                                        <Ellipse Grid.Column="2" Width="12" Height="12" Fill="{StaticResource ElectricBlueBrush}" 
+                                                                 HorizontalAlignment="Right" VerticalAlignment="Center" Margin="15,0,0,0"
+                                                                 Visibility="{Binding IsRead, Converter={StaticResource InverseBoolToVisConverter}}"/>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </Border>
+                            </Expander>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
     </Grid>
 </UserControl>

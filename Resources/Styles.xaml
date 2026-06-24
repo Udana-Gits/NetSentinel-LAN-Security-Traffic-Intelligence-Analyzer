@@ -52,6 +52,19 @@
             </Trigger>
         </Style.Triggers>
     </Style>
+    
+    <!-- Dark Blue Button Style -->
+    <Style x:Key="DarkBlueButton" TargetType="Button" BasedOn="{StaticResource ModernButton}">
+        <Setter Property="Background" Value="{StaticResource DeepNavyBlueBrush}"/>
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="{StaticResource DarkBgBrush}"/>
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.5"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
 
     <!-- Card Style -->
     <Style x:Key="Card" TargetType="Border">
