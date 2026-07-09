@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.Input;
 using Microsoft.Win32;
 using NetSentinel.Core;
 using NetSentinel.Data;
+using NetSentinel.Services;
 using Serilog;
 
 namespace NetSentinel.ViewModels;
@@ -18,6 +19,7 @@ public partial class SettingsViewModel : ObservableObject
     private readonly ILogger _logger;
     private readonly DatabaseService _database;
     private readonly DeviceScanner _deviceScanner;
+    private readonly ThreatIntelService _threatIntelService;
     private AppSettings _settings;
 
     [ObservableProperty]
@@ -54,17 +56,50 @@ public partial class SettingsViewModel : ObservableObject
     private int _failedLoginThresholdCritical;
 
     [ObservableProperty]
+    private int _portScanThreshold;
+
+    [ObservableProperty]
     private string _statusMessage = "Ready";
 
-    public SettingsViewModel(ILogger logger, DatabaseService database, DeviceScanner deviceScanner)
+    [ObservableProperty]
+    private int _threatIntelCount;
+
+    [ObservableProperty]
+    private string _threatIntelLastUpdated = "Never";
+
+    [ObservableProperty]
+    private bool _isThreatIntelUpdating;
+
+    public SettingsViewModel(ILogger logger, DatabaseService database, DeviceScanner deviceScanner, ThreatIntelService threatIntelService)
     {
         _logger = logger;
         _database = database;
         _deviceScanner = deviceScanner;
+        _threatIntelService = threatIntelService;
 
         _settings = new AppSettings();
 
+        _threatIntelService.StatusChanged += ThreatIntelService_StatusChanged;
+        UpdateThreatIntelProperties();
+
         _ = LoadSettingsAsync();
+    }
+
+    private void ThreatIntelService_StatusChanged(object? sender, EventArgs e)
+    {
+        System.Windows.Application.Current?.Dispatcher?.Invoke(() =>
+        {
+            UpdateThreatIntelProperties();
+        });
+    }
+
+    private void UpdateThreatIntelProperties()
+    {
+        ThreatIntelCount = _threatIntelService.BlocklistCount;
+        ThreatIntelLastUpdated = _threatIntelService.LastUpdated == DateTime.MinValue
+            ? "Never"
+            : _threatIntelService.LastUpdated.ToLocalTime().ToString("g");
+        IsThreatIntelUpdating = _threatIntelService.IsUpdating;
     }
 
     private async Task LoadSettingsAsync()
@@ -84,6 +119,7 @@ public partial class SettingsViewModel : ObservableObject
             FailedLoginThresholdInfo = _settings.FailedLoginThresholdInfo;
             FailedLoginThresholdWarning = _settings.FailedLoginThresholdWarning;
             FailedLoginThresholdCritical = _settings.FailedLoginThresholdCritical;
+            PortScanThreshold = _settings.PortScanThreshold;
 
             _logger.Information("Settings loaded");
         }
@@ -112,6 +148,7 @@ public partial class SettingsViewModel : ObservableObject
             _settings.FailedLoginThresholdInfo = FailedLoginThresholdInfo;
             _settings.FailedLoginThresholdWarning = FailedLoginThresholdWarning;
             _settings.FailedLoginThresholdCritical = FailedLoginThresholdCritical;
+            _settings.PortScanThreshold = PortScanThreshold;
 
             await _database.UpdateSettingsAsync(_settings);
 
@@ -211,6 +248,35 @@ public partial class SettingsViewModel : ObservableObject
         catch (Exception ex)
         {
             _logger.Warning(ex, "Failed to update Windows startup setting");
+        }
+    }
+
+    [RelayCommand]
+    private async Task UpdateThreatIntel()
+    {
+        try
+        {
+            StatusMessage = "Updating threat intelligence blocklist...";
+            var success = await _threatIntelService.UpdateBlocklistAsync();
+            if (success)
+            {
+                StatusMessage = "Threat intelligence blocklist updated successfully";
+                MessageBox.Show("Threat intelligence blocklist has been updated successfully!", "Update Successful",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            else
+            {
+                StatusMessage = "Failed to update threat intelligence blocklist";
+                MessageBox.Show("Failed to update the threat intelligence blocklist. Please check your internet connection and try again.", "Update Failed",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.Error(ex, "Failed to update threat intelligence");
+            StatusMessage = "Error updating threat intelligence";
+            MessageBox.Show($"Error updating threat intelligence: {ex.Message}", "Error",
+                MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 }

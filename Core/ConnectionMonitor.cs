@@ -263,7 +263,7 @@ public class ConnectionMonitor
         return new ConnectionStats
         {
             TotalConnections = connections.Count,
-            TcpConnections = connections.Count(c => c.Protocol == "TCP" && c.State != "LISTENING"),
+            TcpConnections = connections.Count(c => c.Protocol == "TCP"),
             TcpListeners = connections.Count(c => c.Protocol == "TCP" && c.State == "LISTENING"),
             UdpListeners = connections.Count(c => c.Protocol == "UDP"),
             EstablishedConnections = connections.Count(c => c.State == "ESTABLISHED")

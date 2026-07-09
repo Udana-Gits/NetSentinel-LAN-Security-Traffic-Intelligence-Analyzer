@@ -23,6 +23,8 @@ public class AgentReceiver
     private readonly DatabaseService _database;
     private readonly AlertService _alertService;
     private readonly NetworkManager _networkManager;
+    private readonly ThreatIntelService _threatIntelService;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<(string Ip, string Domain), DateTime> _lastMaliciousDomainAlertTimes = new();
     private HttpListener? _listener;
     private UdpClient? _udpClient;
     private CancellationTokenSource? _cts;
@@ -89,12 +91,13 @@ public class AgentReceiver
     /// </summary>
     public event EventHandler<AgentRegistrationEventArgs>? AgentRegistered;
 
-    public AgentReceiver(ILogger logger, DatabaseService database, AlertService alertService, NetworkManager networkManager)
+    public AgentReceiver(ILogger logger, DatabaseService database, AlertService alertService, NetworkManager networkManager, ThreatIntelService threatIntelService)
     {
         _logger = logger;
         _database = database;
         _alertService = alertService;
         _networkManager = networkManager;
+        _threatIntelService = threatIntelService;
     }
 
     /// <summary>
@@ -569,6 +572,27 @@ public class AgentReceiver
                 });
             }
 
+            // Reputation / Threat Intelligence Filtering for Mobile Telemetry
+            if (telemetry.RecentDomains != null)
+            {
+                foreach (var visit in telemetry.RecentDomains)
+                {
+                    if (_threatIntelService.IsMalicious(visit.Domain))
+                    {
+                        await RaiseMobileMaliciousDomainAlertDebouncedAsync(telemetry, macAddress, visit.Domain);
+                    }
+                }
+            }
+
+            if (!string.IsNullOrEmpty(telemetry.ActiveWebsite))
+            {
+                var activeDomain = ExtractDomain(telemetry.ActiveWebsite);
+                if (_threatIntelService.IsMalicious(activeDomain))
+                {
+                    await RaiseMobileMaliciousDomainAlertDebouncedAsync(telemetry, macAddress, activeDomain);
+                }
+            }
+ 
             // Mobile domain visit analysis — Rapid repeated login page visits (brute-force indicator)
             if (telemetry.RecentDomains != null && telemetry.RecentDomains.Count > 0)
             {
@@ -926,6 +950,54 @@ public class AgentReceiver
         }
 
         return null;
+    }
+
+    private string ExtractDomain(string urlOrDomain)
+    {
+        if (string.IsNullOrEmpty(urlOrDomain)) return string.Empty;
+        try
+        {
+            if (urlOrDomain.Contains("://"))
+            {
+                var uri = new Uri(urlOrDomain);
+                return uri.Host;
+            }
+            else
+            {
+                var parts = urlOrDomain.Split(':');
+                return parts[0].Trim();
+            }
+        }
+        catch
+        {
+            return urlOrDomain;
+        }
+    }
+
+    private async Task RaiseMobileMaliciousDomainAlertDebouncedAsync(AgentTelemetry telemetry, string macAddress, string domain)
+    {
+        var ipAddress = telemetry.DeviceInfo.IpAddress;
+        var now = DateTime.UtcNow;
+        var key = (ipAddress, domain);
+        if (_lastMaliciousDomainAlertTimes.TryGetValue(key, out var lastAlert) && (now - lastAlert).TotalSeconds < 60)
+        {
+            return;
+        }
+        _lastMaliciousDomainAlertTimes[key] = now;
+
+        var deviceName = $"{telemetry.DeviceInfo.Manufacturer} {telemetry.DeviceInfo.Model}";
+
+        await _alertService.RaiseAlertAsync(new SecurityAlert
+        {
+            Timestamp = now,
+            Severity = AlertSeverity.Critical,
+            Title = "Threat Intelligence Alert: Malicious Domain Contact",
+            Description = $"Mobile device {deviceName} ({ipAddress}) attempted to contact a known malicious domain: {domain}. This domain is flagged on the threat intelligence blocklist as associated with malware, phishing, or command-and-control (C&C) activities.",
+            SourceIp = ipAddress,
+            SourceMac = macAddress
+        });
+
+        _logger.Warning("Threat Intelligence Alert raised: Mobile {Device} tried to access malicious domain {Domain}", deviceName, domain);
     }
 }
 

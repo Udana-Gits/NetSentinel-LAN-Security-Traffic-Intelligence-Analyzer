@@ -180,6 +180,7 @@ public class AppSettings
     public int FailedLoginThresholdInfo { get; set; } = 1;
     public int FailedLoginThresholdWarning { get; set; } = 5;
     public int FailedLoginThresholdCritical { get; set; } = 50;
+    public int PortScanThreshold { get; set; } = 8;
 }
 
 /// <summary>

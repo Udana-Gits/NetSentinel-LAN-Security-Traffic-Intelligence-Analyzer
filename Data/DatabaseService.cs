@@ -100,6 +100,12 @@ public class DatabaseService
             }
             catch (SqliteException) { }
 
+            try
+            {
+                await connection.ExecuteAsync("ALTER TABLE Settings ADD COLUMN PortScanThreshold INTEGER NOT NULL DEFAULT 8;");
+            }
+            catch (SqliteException) { }
+
             await connection.ExecuteAsync(@"
                 CREATE TABLE IF NOT EXISTS BandwidthHistory (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -140,7 +146,8 @@ public class DatabaseService
                     DarkMode INTEGER NOT NULL DEFAULT 1,
                     FailedLoginThresholdInfo INTEGER NOT NULL DEFAULT 1,
                     FailedLoginThresholdWarning INTEGER NOT NULL DEFAULT 5,
-                    FailedLoginThresholdCritical INTEGER NOT NULL DEFAULT 50
+                    FailedLoginThresholdCritical INTEGER NOT NULL DEFAULT 50,
+                    PortScanThreshold INTEGER NOT NULL DEFAULT 8
                 );
             ");
 
@@ -149,8 +156,9 @@ public class DatabaseService
                 INSERT OR IGNORE INTO Settings (Id, AutoScanDevices, ScanIntervalMinutes, 
                     EnablePacketCapture, ShowNotifications, MinimizeToTray, AutoStartWithWindows,
                     TrafficSpikeThreshold, ConnectionCountThreshold, DarkMode,
-                    FailedLoginThresholdInfo, FailedLoginThresholdWarning, FailedLoginThresholdCritical)
-                VALUES (1, 1, 5, 1, 1, 1, 0, 10000, 100, 1, 1, 5, 50);
+                    FailedLoginThresholdInfo, FailedLoginThresholdWarning, FailedLoginThresholdCritical,
+                    PortScanThreshold)
+                VALUES (1, 1, 5, 1, 1, 1, 0, 10000, 100, 1, 1, 5, 50, 8);
             ");
 
             // Migration: Clean up and merge duplicate MAC addresses (case-insensitive merge)
@@ -598,7 +606,8 @@ public class DatabaseService
                 DarkMode = @DarkMode,
                 FailedLoginThresholdInfo = @FailedLoginThresholdInfo,
                 FailedLoginThresholdWarning = @FailedLoginThresholdWarning,
-                FailedLoginThresholdCritical = @FailedLoginThresholdCritical
+                FailedLoginThresholdCritical = @FailedLoginThresholdCritical,
+                PortScanThreshold = @PortScanThreshold
             WHERE Id = 1",
             settings
         );

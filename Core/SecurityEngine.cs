@@ -23,6 +23,8 @@ public class SecurityEngine
     private readonly ConnectionMonitor _connectionMonitor;
     private readonly DeviceScanner _deviceScanner;
     private readonly PacketCaptureService _packetCapture;
+    private readonly ThreatIntelService _threatIntelService;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<(string Ip, string Domain), DateTime> _lastMaliciousDomainAlertTimes = new();
 
     private readonly List<SecurityRule> _rules;
     private string? _lastKnownGatewayMac;
@@ -62,7 +64,8 @@ public class SecurityEngine
         BandwidthMonitor bandwidthMonitor,
         ConnectionMonitor connectionMonitor,
         DeviceScanner deviceScanner,
-        PacketCaptureService packetCapture)
+        PacketCaptureService packetCapture,
+        ThreatIntelService threatIntelService)
     {
         _logger = logger;
         _database = database;
@@ -72,6 +75,7 @@ public class SecurityEngine
         _connectionMonitor = connectionMonitor;
         _deviceScanner = deviceScanner;
         _packetCapture = packetCapture;
+        _threatIntelService = threatIntelService;
 
         _rules = InitializeDefaultRules();
         _knownDeviceMacs = new HashSet<string>();
@@ -262,7 +266,8 @@ public class SecurityEngine
                     break;
 
                 case RuleType.PortScan:
-                    await CheckPortScanAsync(rule.ThresholdValue);
+                    var portScanThreshold = settings.PortScanThreshold > 0 ? settings.PortScanThreshold : 8;
+                    await CheckPortScanAsync(portScanThreshold);
                     break;
             }
         }
@@ -705,6 +710,13 @@ public class SecurityEngine
             return;
 
         var query = e.Query.ToLowerInvariant();
+
+        // Threat Intelligence & Reputation Filtering
+        if (_threatIntelService.IsMalicious(query))
+        {
+            _ = RaiseMaliciousDomainAlertDebouncedAsync(e.SourceIp, query);
+        }
+
         if (query.Contains("facebook.com") || query.Contains("fbcdn.net"))
         {
             var now = DateTime.UtcNow;
@@ -728,6 +740,48 @@ public class SecurityEngine
                 _ = RaiseFacebookAlertDebouncedAsync(e.SourceIp, count);
             }
         }
+    }
+
+    private async Task RaiseMaliciousDomainAlertDebouncedAsync(string ipAddress, string domain)
+    {
+        var now = DateTime.UtcNow;
+        var key = (ipAddress, domain);
+        if (_lastMaliciousDomainAlertTimes.TryGetValue(key, out var lastAlert) && (now - lastAlert).TotalSeconds < 60)
+        {
+            return;
+        }
+        _lastMaliciousDomainAlertTimes[key] = now;
+
+        var devices = await _deviceScanner.GetKnownDevicesAsync();
+        var dev = devices.FirstOrDefault(d => d.IpAddress == ipAddress);
+        
+        var localIp = GetLocalIPAddress();
+        string deviceName;
+        string? sourceIp;
+        string? sourceMac = dev?.MacAddress;
+
+        if (ipAddress == localIp || ipAddress == "127.0.0.1")
+        {
+            deviceName = "Local Laptop (This PC)";
+            sourceIp = localIp;
+        }
+        else
+        {
+            deviceName = dev != null ? $"{dev.Vendor} ({ipAddress})" : ipAddress;
+            sourceIp = ipAddress;
+        }
+
+        await _alertService.RaiseAlertAsync(new SecurityAlert
+        {
+            Timestamp = now,
+            Severity = AlertSeverity.Critical,
+            Title = "Threat Intelligence Alert: Malicious Domain Contact",
+            Description = $"Device {deviceName} attempted to contact a known malicious domain: {domain}. This domain is flagged on the threat intelligence blocklist as associated with malware, phishing, or command-and-control (C&C) activities.",
+            SourceIp = sourceIp,
+            SourceMac = sourceMac
+        });
+        
+        _logger.Warning("Threat Intelligence Alert raised: {Device} tried to access malicious domain {Domain}", deviceName, domain);
     }
 
     private async Task RaiseFacebookAlertDebouncedAsync(string ipAddress, int count)

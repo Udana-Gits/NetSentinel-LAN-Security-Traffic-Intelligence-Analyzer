@@ -68,7 +68,7 @@
                                 Style="{StaticResource NumericTextBox}"/>
                     </Grid>
 
-                    <Grid>
+                    <Grid Margin="0,0,0,15">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="300"/>
                             <ColumnDefinition Width="*"/>
@@ -78,6 +78,18 @@
                                   VerticalAlignment="Center"/>
                         <TextBox Grid.Column="1" Text="{Binding ConnectionCountThreshold}" 
                                 Style="{StaticResource NumericTextBox}"/>
+                    </Grid>
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="300"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Port scan trigger threshold (distinct ports):" 
+                                   Foreground="{StaticResource LightTextBrush}" FontSize="14" 
+                                   VerticalAlignment="Center"/>
+                        <TextBox Grid.Column="1" Text="{Binding PortScanThreshold}" 
+                                 Style="{StaticResource NumericTextBox}"/>
                     </Grid>
 
                     <TextBlock Text="Alerts will be generated when these thresholds are exceeded" 
@@ -126,6 +138,45 @@
                         <TextBox Grid.Column="1" Text="{Binding FailedLoginThresholdCritical}" 
                                  Style="{StaticResource NumericTextBox}"/>
                     </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Threat Intelligence -->
+            <Border Style="{StaticResource Card}" Margin="0,0,0,20">
+                <StackPanel>
+                    <TextBlock Text="Threat Intelligence (DNS Sinkholing / Reputation Filtering)" FontSize="18" FontWeight="SemiBold" 
+                              Foreground="{StaticResource LightTextBrush}" Margin="0,0,0,15"/>
+
+                    <TextBlock Text="NetSentinel intercepts and matches DNS queries from both your local PC and the connected Android companion against a reputation database to block connections to known malware, phishing, and C&amp;C hosts." 
+                              FontSize="13" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" Margin="0,0,0,20"/>
+
+                    <Grid Margin="0,0,0,15">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="220"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Database status:" Foreground="{StaticResource LightTextBrush}" FontSize="14" VerticalAlignment="Center"/>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                            <TextBlock Text="{Binding ThreatIntelCount, StringFormat='{}{0:N0} malicious domains loaded'}" Foreground="{StaticResource ElectricBlueBrush}" FontSize="14" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <Grid Margin="0,0,0,20">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="220"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Last updated:" Foreground="{StaticResource LightTextBrush}" FontSize="14" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="1" Text="{Binding ThreatIntelLastUpdated}" Foreground="{StaticResource MutedTextBrush}" FontSize="14" VerticalAlignment="Center"/>
+                    </Grid>
+
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="Update Threat Intel Database" 
+                                Command="{Binding UpdateThreatIntelCommand}"
+                                Style="{StaticResource ModernButton}"
+                                IsEnabled="{Binding IsThreatIntelUpdating, Converter={StaticResource InverseBoolConverter}}"
+                                Padding="20,10" FontSize="14"/>
+                    </StackPanel>
                 </StackPanel>
             </Border>
 

@@ -43,7 +43,7 @@ public partial class DeviceConnections : ObservableObject
     public ObservableCollection<NetworkConnection> BackgroundConnections { get; set; } = new();
 
     public int TotalConnections => RawConnections.Count;
-    public int TcpConnections => RawConnections.Count(c => c.Protocol == "TCP" && c.State != "LISTENING");
+    public int TcpConnections => RawConnections.Count(c => c.Protocol == "TCP");
     public int UdpListeners => RawConnections.Count(c => c.Protocol == "UDP");
 }
 
@@ -261,7 +261,7 @@ public partial class ConnectionsViewModel : ObservableObject
 
                 // Update counts per device
                 total += device.RawConnections.Count;
-                tcp += device.RawConnections.Count(c => c.Protocol == "TCP" && c.State != "LISTENING");
+                tcp += device.RawConnections.Count(c => c.Protocol == "TCP");
                 udp += device.RawConnections.Count(c => c.Protocol == "UDP");
                 established += device.RawConnections.Count(c => c.State == "ESTABLISHED");
             }

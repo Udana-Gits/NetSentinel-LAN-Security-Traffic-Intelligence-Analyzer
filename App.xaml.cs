@@ -68,6 +68,7 @@ public partial class App : Application
                     services.AddSingleton<AlertService>();
                     services.AddSingleton<BackgroundScheduler>();
                     services.AddSingleton<AgentReceiver>();
+                    services.AddSingleton<ThreatIntelService>();
 
                     // Register ViewModels
                     services.AddSingleton<DashboardViewModel>();
@@ -157,6 +158,10 @@ public partial class App : Application
             var packetCapture = _host.Services.GetRequiredService<PacketCaptureService>();
             var database = _host.Services.GetRequiredService<DatabaseService>();
             var agentReceiver = _host.Services.GetRequiredService<AgentReceiver>();
+            var threatIntel = _host.Services.GetRequiredService<ThreatIntelService>();
+
+            // Load threat intelligence blocklist
+            await threatIntel.LoadBlocklistAsync();
 
             // Get settings
             var settings = await database.GetSettingsAsync();
